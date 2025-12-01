@@ -4,6 +4,7 @@ import { Nango } from '@nangohq/node';
 import winston from 'winston';
 import { CONFIG } from '../config';
 import axios from 'axios';
+import { SessionAwareWarmupManager } from './SessionAwareWarmupManager';
 
 // Interface definitions remain the same for type safety
 interface NangoResponse {
@@ -16,6 +17,7 @@ export class NangoService {
   private nango: Nango;
   private logger: winston.Logger;
   private connectionWarmCache: Map<string, number> = new Map(); // connectionId -> lastWarmedTimestamp
+  private warmupManager: SessionAwareWarmupManager;
 
   constructor() {
     if (!CONFIG.NANGO_SECRET_KEY) {
@@ -33,7 +35,8 @@ export class NangoService {
       ],
     });
     this.nango = new Nango({ secretKey: CONFIG.NANGO_SECRET_KEY });
-    this.logger.info(`NangoService initialized.`);
+    this.warmupManager = new SessionAwareWarmupManager();
+    this.logger.info(`NangoService initialized with SessionAwareWarmupManager.`);
   }
 
   // Connection warming to eliminate cold start penalties
@@ -199,8 +202,7 @@ async triggerSalesforceAction(
 
   this.logger.info('Triggering Salesforce action via Nango action trigger', { 
     actionName, 
-    input: actionPayload 
-  });
+    input: actionPayload  });
 
   try {
     // Ensure connection is warm before executing
@@ -316,8 +318,20 @@ async triggerSalesforceAction(
         }
       );
       
-      this.logger.info('Nango direct API call successful', { actionName });
-      return response.data as NangoResponse;
+      // Log metadata without full response bodies
+      const responseData = response.data as NangoResponse;
+      const emailCount = Array.isArray(responseData) ? responseData.length : 
+                         responseData?.data && Array.isArray(responseData.data) ? responseData.data.length : 1;
+      const responseSize = JSON.stringify(responseData).length;
+      
+      this.logger.info('Nango fetch-emails call successful', { 
+        actionName,
+        emailCount,
+        responseSizeBytes: responseSize,
+        note: 'Email bodies excluded from logs for brevity'
+      });
+      
+      return responseData;
 
     } catch (error: any) {
       this.logger.error('Nango direct API call to fetch-emails failed', {
@@ -510,5 +524,134 @@ async triggerSalesforceAction(
       totalConnections: this.connectionWarmCache.size,
       cacheSize: this.connectionWarmCache.size
     };
+  }
+
+  /**
+   * === SESSION-AWARE WARMUP SYSTEM ===
+   * Provider-specific lightweight warmup strategies executed via Nango action trigger.
+   * Results are cached/suppressed and NOT broadcast to client.
+   * Each warmup performs a real lightweight Nango action ONCE per session.
+   * 
+   * Warmups route through Nango platform so tokens are properly wrapped via connection ID.
+   */
+
+  /**
+   * Get warmup manager (for integration with orchestration layer).
+   */
+  public getWarmupManager(): SessionAwareWarmupManager {
+    return this.warmupManager;
+  }
+
+  /**
+   * Generic Nango action warmup trigger.
+   * Routes through Nango platform - tokens wrapped via connection ID.
+   * Results cached/suppressed, NOT broadcast to client.
+   */
+  private async triggerNangoWarmupAction(
+    providerConfigKey: string,
+    connectionId: string
+  ): Promise<void> {
+    try {
+      // Unified lightweight warmup via /v1/whoami endpoint
+      // Works across all providers (Google, Outlook, Salesforce, Notion, Slack, etc.)
+      // Token wrapping happens via connection ID on Nango's side
+      await axios.get(
+        'https://api.nango.dev/v1/whoami',
+        {
+          headers: {
+            'Authorization': `Bearer ${CONFIG.NANGO_SECRET_KEY}`,
+            'Provider-Config-Key': providerConfigKey,
+            'Connection-Id': connectionId,
+          },
+          timeout: 5000, // Lightweight warmup should be fast
+        }
+      );
+
+      this.logger.debug('Nango whoami warmup executed', {
+        providerConfigKey,
+        connectionId: '***',
+      });
+      // Result is suppressed - not used/broadcast
+    } catch (error: any) {
+      // Warmup failure is non-critical
+      this.logger.warn('Nango whoami warmup failed (non-critical)', {
+        providerConfigKey,
+        error: error.message,
+        connectionId: '***',
+      });
+      throw error; // Still propagate for warmup tracking
+    }
+  }
+
+  /**
+   * Google Workspace warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupGoogle(
+    connectionId: string,
+    providerConfigKey: string = 'google'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+  }
+
+  /**
+   * Google Calendar warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupGoogleCalendar(
+    connectionId: string,
+    providerConfigKey: string = 'google-calendar'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+  }
+
+  /**
+   * Outlook warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupOutlook(
+    connectionId: string,
+    providerConfigKey: string = 'outlook'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+  }
+
+  /**
+   * Salesforce warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupSalesforce(
+    connectionId: string,
+    providerConfigKey: string = 'salesforce'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+  }
+
+  /**
+   * Notion warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupNotion(
+    connectionId: string,
+    providerConfigKey: string = 'notion'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+  }
+
+  /**
+   * Slack warmup: Unified /v1/whoami endpoint via Nango.
+   * Token wrapped via Nango connection ID.
+   * Result cached, not broadcast.
+   */
+  public async warmupSlack(
+    connectionId: string,
+    providerConfigKey: string = 'slack'
+  ): Promise<void> {
+    await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
   }
 }

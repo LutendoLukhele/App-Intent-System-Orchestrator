@@ -8,6 +8,7 @@ const node_1 = require("@nangohq/node");
 const winston_1 = __importDefault(require("winston"));
 const config_1 = require("../config");
 const axios_1 = __importDefault(require("axios"));
+const SessionAwareWarmupManager_1 = require("./SessionAwareWarmupManager");
 class NangoService {
     constructor() {
         this.connectionWarmCache = new Map();
@@ -23,7 +24,8 @@ class NangoService {
             ],
         });
         this.nango = new node_1.Nango({ secretKey: config_1.CONFIG.NANGO_SECRET_KEY });
-        this.logger.info(`NangoService initialized.`);
+        this.warmupManager = new SessionAwareWarmupManager_1.SessionAwareWarmupManager();
+        this.logger.info(`NangoService initialized with SessionAwareWarmupManager.`);
     }
     async warmConnection(providerConfigKey, connectionId, force = false) {
         const cacheKey = `${providerConfigKey}:${connectionId}`;
@@ -216,8 +218,17 @@ class NangoService {
                     'Content-Type': 'application/json'
                 }
             });
-            this.logger.info('Nango direct API call successful', { actionName });
-            return response.data;
+            const responseData = response.data;
+            const emailCount = Array.isArray(responseData) ? responseData.length :
+                responseData?.data && Array.isArray(responseData.data) ? responseData.data.length : 1;
+            const responseSize = JSON.stringify(responseData).length;
+            this.logger.info('Nango fetch-emails call successful', {
+                actionName,
+                emailCount,
+                responseSizeBytes: responseSize,
+                note: 'Email bodies excluded from logs for brevity'
+            });
+            return responseData;
         }
         catch (error) {
             this.logger.error('Nango direct API call to fetch-emails failed', {
@@ -359,6 +370,51 @@ class NangoService {
             totalConnections: this.connectionWarmCache.size,
             cacheSize: this.connectionWarmCache.size
         };
+    }
+    getWarmupManager() {
+        return this.warmupManager;
+    }
+    async triggerNangoWarmupAction(providerConfigKey, connectionId) {
+        try {
+            await axios_1.default.get('https://api.nango.dev/v1/whoami', {
+                headers: {
+                    'Authorization': `Bearer ${config_1.CONFIG.NANGO_SECRET_KEY}`,
+                    'Provider-Config-Key': providerConfigKey,
+                    'Connection-Id': connectionId,
+                },
+                timeout: 5000,
+            });
+            this.logger.debug('Nango whoami warmup executed', {
+                providerConfigKey,
+                connectionId: '***',
+            });
+        }
+        catch (error) {
+            this.logger.warn('Nango whoami warmup failed (non-critical)', {
+                providerConfigKey,
+                error: error.message,
+                connectionId: '***',
+            });
+            throw error;
+        }
+    }
+    async warmupGoogle(connectionId, providerConfigKey = 'google') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+    }
+    async warmupGoogleCalendar(connectionId, providerConfigKey = 'google-calendar') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+    }
+    async warmupOutlook(connectionId, providerConfigKey = 'outlook') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+    }
+    async warmupSalesforce(connectionId, providerConfigKey = 'salesforce') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+    }
+    async warmupNotion(connectionId, providerConfigKey = 'notion') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
+    }
+    async warmupSlack(connectionId, providerConfigKey = 'slack') {
+        await this.triggerNangoWarmupAction(providerConfigKey, connectionId);
     }
 }
 exports.NangoService = NangoService;

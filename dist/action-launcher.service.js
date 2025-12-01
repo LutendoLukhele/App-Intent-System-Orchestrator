@@ -221,7 +221,7 @@ class ActionLauncherService extends events_1.EventEmitter {
         return action;
     }
     async executeAction(sessionId, userId, payload, toolOrchestrator, planId, stepId) {
-        const { actionId, toolName } = payload;
+        const { actionId, toolName, arguments: payloadArguments } = payload;
         logger.info('ActionLauncher: Executing action', {
             sessionId,
             actionId,
@@ -240,12 +240,22 @@ class ActionLauncherService extends events_1.EventEmitter {
             });
             throw new Error(`Action ${actionId} not found`);
         }
-        const finalArgs = action.arguments || {};
-        logger.info('ActionLauncher: Using stored arguments', {
+        const finalArgs = payloadArguments || action.arguments || {};
+        if (payloadArguments) {
+            console.log("🔄 ACTION_ARGS_UPDATED:", {
+                actionId,
+                toolName,
+                oldArgs: action.arguments,
+                newArgs: payloadArguments
+            });
+        }
+        action.arguments = finalArgs;
+        logger.info('ActionLauncher: Using execution arguments', {
             sessionId,
             actionId,
             toolName,
-            arguments: finalArgs
+            arguments: finalArgs,
+            source: payloadArguments ? 'payload' : 'stored'
         });
         action.status = 'executing';
         try {

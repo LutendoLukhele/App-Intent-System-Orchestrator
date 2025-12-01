@@ -301,11 +301,11 @@ export class ActionLauncherService extends EventEmitter {
     planId: string, // Added planId
     stepId: string  // Added stepId
   ): Promise<ActiveAction> {
-    const { actionId, toolName } = payload;
-    
-    logger.info('ActionLauncher: Executing action', { 
-      sessionId, 
-      actionId, 
+    const { actionId, toolName, arguments: payloadArguments } = payload;
+
+    logger.info('ActionLauncher: Executing action', {
+      sessionId,
+      actionId,
       toolName,
       userId,
       planId, // Log for traceability
@@ -314,7 +314,7 @@ export class ActionLauncherService extends EventEmitter {
     });
 
     const action = this.getAction(sessionId, actionId);
-    
+
     if (!action) {
       logger.error('ActionLauncher: Action not found', {
         sessionId,
@@ -323,15 +323,30 @@ export class ActionLauncherService extends EventEmitter {
       });
       throw new Error(`Action ${actionId} not found`);
     }
-    
-    // Use the arguments stored in the action object
-    const finalArgs = action.arguments || {};
-    
-    logger.info('ActionLauncher: Using stored arguments', {
+
+    // CRITICAL FIX: Use payload arguments (which include resolved placeholders and LLM fixes)
+    // instead of the old stored arguments from when the action was first created
+    const finalArgs = payloadArguments || action.arguments || {};
+
+    // DEBUG: Log argument updates
+    if (payloadArguments) {
+      console.log("🔄 ACTION_ARGS_UPDATED:", {
+        actionId,
+        toolName,
+        oldArgs: action.arguments,
+        newArgs: payloadArguments
+      });
+    }
+
+    // Update stored action arguments for consistency
+    action.arguments = finalArgs;
+
+    logger.info('ActionLauncher: Using execution arguments', {
       sessionId,
       actionId,
       toolName,
-      arguments: finalArgs
+      arguments: finalArgs,
+      source: payloadArguments ? 'payload' : 'stored'
     });
 
     action.status = 'executing';

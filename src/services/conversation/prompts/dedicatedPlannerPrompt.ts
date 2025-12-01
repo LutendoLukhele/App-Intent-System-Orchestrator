@@ -27,6 +27,13 @@ Available Tools (use the exact 'name' property from this list for the 'tool' fie
    - For Salesforce data, use 'fetch_entity' (not 'fetch_deals', 'fetch_contacts', etc.)
    - For updates, use the appropriate update tool from the list
 
+4. **HANDLING VAGUE REQUESTS - USE PLACEHOLDERS:**
+   - If parameters are missing or vague, use placeholder format: {{PLACEHOLDER_parameter_name}}
+   - DO NOT mark status as "conditional" when you can use placeholders
+   - The UI will prompt the user to fill in placeholders
+   - Example: {{PLACEHOLDER_meeting_title}}, {{PLACEHOLDER_attendee_email}}, {{PLACEHOLDER_start_time}}
+   - Always set status to "ready" when using placeholders - the plan should proceed to execution
+
 ---
 
 Instructions:
@@ -36,10 +43,12 @@ Instructions:
     b.  Write a user-friendly "intent" describing the goal of the action.
     c.  Select the most appropriate "tool" from the "Available Tools" list - USE THE EXACT NAME.
     d.  Extract or determine the "arguments" for the tool.
+        - If a parameter is missing or unclear, use {{PLACEHOLDER_parameter_name}} instead
+        - Example: "title": "{{PLACEHOLDER_meeting_title}}" if the meeting title is not specified
     e.  Determine the "status":
-        - "ready": If all required parameters are present.
-        - "conditional": If any *required* parameters are missing or need clarification.
-    f.  If "status" is "conditional", list the names of the missing required parameters in "requiredParams".
+        - "ready": Always use this when using placeholders OR when all parameters are present
+        - "conditional": NEVER use this - use placeholders instead
+    f.  requiredParams array: Always empty [] since we use placeholders
 
 3.  **DATA DEPENDENCY**: If an argument for a later step requires the output from an earlier step, you MUST use a placeholder string. The format is '{{stepId.result.path.to.data}}', where 'stepId' is the 'id' of the step providing the data.
 
@@ -50,30 +59,23 @@ Each action object in the "plan" array must strictly follow this format:
   "id": "string",
   "intent": "string",
   "tool": "string",  // MUST be an exact match from Available Tools
-  "arguments": { /* JSON object of arguments */ },
-  "status": "ready" | "conditional",
-  "requiredParams": ["string"] // Only if status is "conditional"
+  "arguments": { /* JSON object of arguments - use placeholders for missing params */ },
+  "status": "ready",
+  "requiredParams": []
 }
 
-Example Output with Data Dependency:
+Example Output with Placeholders (PREFERRED when info is missing):
 {
   "plan": [
     {
       "id": "action_1",
-      "intent": "Find the contact information for Jane Doe.",
-      "tool": "fetch_entity",
-      "arguments": { "entityType": "Contact", "filters": { "conditions": [{ "field": "Name", "operator": "equals", "value": "Jane Doe" }] } },
-      "status": "ready",
-      "requiredParams": []
-    },
-    {
-      "id": "action_2",
-      "intent": "Send an email to Jane Doe.",
-      "tool": "send_email",
+      "intent": "Create a calendar meeting for the sales team",
+      "tool": "create_calendar_event",
       "arguments": { 
-        "to": "{{action_1.result.records[0].Email}}",
-        "subject": "Follow-up Meeting",
-        "body": "Hi Jane, let's schedule a follow-up meeting."
+        "title": "{{PLACEHOLDER_meeting_title}}",
+        "startTime": "{{PLACEHOLDER_start_time}}",
+        "duration": "{{PLACEHOLDER_duration_minutes}}",
+        "attendees": ["{{PLACEHOLDER_attendee_email}}"]
       },
       "status": "ready",
       "requiredParams": []

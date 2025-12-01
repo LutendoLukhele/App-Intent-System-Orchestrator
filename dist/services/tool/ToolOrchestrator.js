@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ToolOrchestrator = void 0;
 const BaseService_1 = require("../base/BaseService");
 const winston_1 = __importDefault(require("winston"));
+const ResponseNormalizationService_1 = require("../ResponseNormalizationService");
 const uuid_1 = require("uuid");
 const config_1 = require("../../config");
 const ioredis_1 = __importDefault(require("ioredis"));
@@ -22,6 +23,7 @@ class ToolOrchestrator extends BaseService_1.BaseService {
         super({ logger: config.logger });
         this.nangoService = config.nangoService;
         this.toolConfigManager = config.toolConfigManager;
+        this.normalizationService = new ResponseNormalizationService_1.ResponseNormalizationService();
         logger.info("ToolOrchestrator initialized with Redis + Postgres fallback.");
     }
     async executeTool(toolCall, planId, stepId) {
@@ -59,7 +61,12 @@ class ToolOrchestrator extends BaseService_1.BaseService {
             else {
                 finalData = nangoResult;
             }
-            return { status: 'success', toolName, data: finalData, error: '' };
+            const { originalResponse, llmResponse, truncationMetadata } = this.normalizationService.normalizeForLLM(toolName, finalData);
+            const enrichedData = {
+                ...llmResponse,
+                _truncation_metadata: truncationMetadata,
+            };
+            return { status: 'success', toolName, data: enrichedData, error: '' };
         }
         catch (error) {
             logger.error('Tool execution failed unexpectedly in orchestrator', { error: error.message, stack: error.stack, toolCall });
@@ -204,6 +211,59 @@ class ToolOrchestrator extends BaseService_1.BaseService {
                 return this.nangoService.triggerGenericNangoAction(providerConfigKey, connectionId, toolName, args);
             default:
                 throw new Error(`No Nango handler for tool: ${toolName}`);
+        }
+    }
+    async executeWarmupAction(provider, connectionId, providerConfigKey, sessionId) {
+        const executionId = `warmup_${provider}_${Date.now()}`;
+        this.logger.info('Executing provider warmup via Nango', {
+            provider,
+            connectionId: '***',
+            providerConfigKey,
+            sessionId,
+            note: 'Result will be cached, not broadcast'
+        });
+        try {
+            const warmupManager = this.nangoService.getWarmupManager();
+            const warmupCallback = this.getProviderWarmupCallback(provider, connectionId, providerConfigKey);
+            if (!warmupCallback) {
+                this.logger.debug('No warmup available for provider', { provider });
+                return null;
+            }
+            const warmupStatus = await warmupManager.warmupProvider(sessionId, provider, connectionId, warmupCallback);
+            this.logger.info('Provider warmup cached (not broadcast)', {
+                provider,
+                warmed: warmupStatus.warmed,
+                duration: warmupStatus.duration,
+            });
+            return warmupStatus;
+        }
+        catch (error) {
+            this.logger.error('Provider warmup failed', {
+                provider,
+                error: error.message,
+                connectionId: '***',
+            });
+            return null;
+        }
+    }
+    getProviderWarmupCallback(provider, connectionId, providerConfigKey) {
+        switch (provider.toLowerCase()) {
+            case 'google':
+            case 'gmail':
+                return () => this.nangoService.warmupGoogle(connectionId, providerConfigKey);
+            case 'google-calendar':
+                return () => this.nangoService.warmupGoogleCalendar(connectionId, providerConfigKey);
+            case 'outlook':
+                return () => this.nangoService.warmupOutlook(connectionId, providerConfigKey);
+            case 'salesforce':
+            case 'salesforce-2':
+                return () => this.nangoService.warmupSalesforce(connectionId, providerConfigKey);
+            case 'notion':
+                return () => this.nangoService.warmupNotion(connectionId, providerConfigKey);
+            case 'slack':
+                return () => this.nangoService.warmupSlack(connectionId, providerConfigKey);
+            default:
+                return null;
         }
     }
 }

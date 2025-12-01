@@ -266,25 +266,53 @@ class ConversationService extends events_1.EventEmitter {
                     temperature: 0.5,
                 });
             }
-            for await (const chunk of responseStream) {
-                const contentDelta = chunk.choices[0]?.delta?.content;
-                const toolCallsDelta = chunk.choices[0]?.delta?.tool_calls;
-                if (contentDelta) {
-                    accumulatedText += contentDelta;
-                    if (parser.parsing && !parserSuccessfullyCleanedUp) {
-                        parser.parseToken(contentDelta);
+            let chunkCount = 0;
+            try {
+                for await (const chunk of responseStream) {
+                    chunkCount++;
+                    const contentDelta = chunk.choices[0]?.delta?.content;
+                    const toolCallsDelta = chunk.choices[0]?.delta?.tool_calls;
+                    if (contentDelta) {
+                        accumulatedText += contentDelta;
+                        if (parser.parsing && !parserSuccessfullyCleanedUp) {
+                            parser.parseToken(contentDelta);
+                        }
+                    }
+                    if (toolCallsDelta) {
+                        if (!accumulatedToolCalls)
+                            accumulatedToolCalls = [];
+                        this.accumulateToolCallDeltas(accumulatedToolCalls, toolCallsDelta);
+                    }
+                    const finishReason = chunk.choices[0]?.finish_reason;
+                    if (finishReason) {
+                        logger.info(`🔥 Conversational stream finished. Reason: ${finishReason}`, {
+                            sessionId,
+                            streamId,
+                            finishReason,
+                            chunkCount
+                        });
+                        break;
                     }
                 }
-                if (toolCallsDelta) {
-                    if (!accumulatedToolCalls)
-                        accumulatedToolCalls = [];
-                    this.accumulateToolCallDeltas(accumulatedToolCalls, toolCallsDelta);
-                }
-                const finishReason = chunk.choices[0]?.finish_reason;
-                if (finishReason) {
-                    logger.info(`Conversational stream finished. Reason: ${finishReason}`, { sessionId, streamId, finishReason });
-                    break;
-                }
+                logger.info('🔥 Stream iteration complete', {
+                    sessionId,
+                    streamId,
+                    chunkCount,
+                    accumulatedTextLength: accumulatedText.length,
+                    hasToolCalls: !!accumulatedToolCalls
+                });
+            }
+            catch (streamError) {
+                logger.error('🔥🔥🔥 ERROR in LLM stream iteration', {
+                    sessionId,
+                    streamId,
+                    error: streamError.message,
+                    errorStack: streamError.stack,
+                    errorName: streamError.name,
+                    chunkCount,
+                    accumulatedTextLength: accumulatedText.length
+                });
+                throw streamError;
             }
             if (parser.parsing && !parserSuccessfullyCleanedUp) {
                 parser.stopParsing();
@@ -343,13 +371,36 @@ class ConversationService extends events_1.EventEmitter {
                     systemPromptPreview: messagesForApi[0]?.content?.substring(0, 300)
                 });
             }
-            const assistantResponse = {
-                role: 'assistant',
-                content: accumulatedText || null,
-                tool_calls: accumulatedToolCalls || null
-            };
-            historyForThisStream.push(assistantResponse);
+            if (accumulatedToolCalls && accumulatedToolCalls.length > 0) {
+                historyForThisStream.push({
+                    role: 'assistant',
+                    content: null,
+                    tool_calls: accumulatedToolCalls
+                });
+            }
+            else if (accumulatedText && accumulatedText.trim().length > 0) {
+                historyForThisStream.push({
+                    role: 'assistant',
+                    content: accumulatedText
+                });
+            }
+            else {
+                logger.warn("Skipping empty assistant message — prevents broken second-turn.", {
+                    sessionId
+                });
+            }
             this.conversationHistory.set(sessionId, this.trimHistory(historyForThisStream));
+        }
+        catch (outerError) {
+            logger.error('🔥🔥🔥 FATAL ERROR in conversational stream', {
+                sessionId,
+                streamId,
+                error: outerError.message,
+                errorStack: outerError.stack,
+                errorName: outerError.name,
+                accumulatedTextLength: accumulatedText.length,
+                hasAccumulatedToolCalls: !!accumulatedToolCalls
+            });
         }
         finally {
             if (!parserSuccessfullyCleanedUp) {
@@ -430,6 +481,19 @@ class ConversationService extends events_1.EventEmitter {
     }
     addToolResultMessageToHistory(sessionId, toolCallId, toolName, resultData) {
         const history = this.getHistory(sessionId);
+        const resultSize = JSON.stringify(resultData).length;
+        const MAX_RESULT_SIZE = 50 * 1024;
+        if (resultSize > MAX_RESULT_SIZE) {
+            logger.warn('Tool result exceeds size limit, truncating for history storage', {
+                sessionId,
+                toolName,
+                toolCallId,
+                originalSize: resultSize,
+                limit: MAX_RESULT_SIZE,
+                oversizeBy: resultSize - MAX_RESULT_SIZE
+            });
+            return;
+        }
         const toolMessage = {
             role: 'tool',
             tool_call_id: toolCallId,
@@ -438,7 +502,7 @@ class ConversationService extends events_1.EventEmitter {
         };
         history.push(toolMessage);
         this.conversationHistory.set(sessionId, this.trimHistory(history));
-        logger.info('Added tool result message to history', { sessionId, toolName, toolCallId });
+        logger.info('Added tool result message to history', { sessionId, toolName, toolCallId, resultSize });
     }
 }
 exports.ConversationService = ConversationService;

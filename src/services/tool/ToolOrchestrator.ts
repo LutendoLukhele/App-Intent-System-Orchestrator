@@ -4,6 +4,8 @@ import { NangoService } from '../NangoService';
 import { ToolResult } from '../conversation/types';
 import winston from 'winston';
 import { ToolConfigManager } from './ToolConfigManager';
+import { ResponseNormalizationService } from '../ResponseNormalizationService';
+import { SessionAwareWarmupManager, WarmupStatus } from '../SessionAwareWarmupManager';
 import { v4 as uuidv4 } from 'uuid';
 import { CONFIG } from '../../config';
 import Redis from 'ioredis';
@@ -22,12 +24,14 @@ const sql = neon('postgresql://neondb_owner:npg_DZ9VLGrHc7jf@ep-hidden-field-adv
 export class ToolOrchestrator extends BaseService {
     private nangoService: NangoService;
     private toolConfigManager: ToolConfigManager;
+    private normalizationService: ResponseNormalizationService;
     logger: any;
 
     constructor(config: { logger: winston.Logger; nangoService: NangoService; toolConfigManager: ToolConfigManager; [key: string]: any; }) {
         super({ logger: config.logger });
         this.nangoService = config.nangoService;
         this.toolConfigManager = config.toolConfigManager;
+        this.normalizationService = new ResponseNormalizationService();
         logger.info("ToolOrchestrator initialized with Redis + Postgres fallback.");
     }
 
@@ -69,7 +73,18 @@ export class ToolOrchestrator extends BaseService {
                 finalData = nangoResult;
             }
 
-            return { status: 'success', toolName, data: finalData, error: '' };
+            // Normalize response for LLM consumption (aggressive removal of verbose fields)
+            // Keep originalResponse for client, use llmResponse for conversation history
+            const { originalResponse, llmResponse, truncationMetadata } =
+                this.normalizationService.normalizeForLLM(toolName, finalData);
+
+            // Attach truncation metadata for debugging
+            const enrichedData = {
+                ...llmResponse,
+                _truncation_metadata: truncationMetadata,
+            };
+
+            return { status: 'success', toolName, data: enrichedData, error: '' };
 
         } catch (error: any) {
             logger.error('Tool execution failed unexpectedly in orchestrator', { error: error.message, stack: error.stack, toolCall });
@@ -270,4 +285,92 @@ export class ToolOrchestrator extends BaseService {
                 throw new Error(`No Nango handler for tool: ${toolName}`);
         }
     }
+
+    /**
+     * Execute a lightweight provider warmup action via Nango.
+     * Warmup results are NOT broadcast to client.
+     * Only tracks success/failure for connection health.
+     * Tokens wrapped via Nango connection ID.
+     */
+    public async executeWarmupAction(
+        provider: string,
+        connectionId: string,
+        providerConfigKey: string,
+        sessionId: string
+    ): Promise<WarmupStatus | null> {
+        const executionId = `warmup_${provider}_${Date.now()}`;
+        this.logger.info('Executing provider warmup via Nango', { 
+            provider, 
+            connectionId: '***', 
+            providerConfigKey,
+            sessionId,
+            note: 'Result will be cached, not broadcast'
+        });
+
+        try {
+            const warmupManager = this.nangoService.getWarmupManager();
+
+            // Get provider-specific warmup callback
+            const warmupCallback = this.getProviderWarmupCallback(provider, connectionId, providerConfigKey);
+            
+            if (!warmupCallback) {
+                this.logger.debug('No warmup available for provider', { provider });
+                return null;
+            }
+
+            // Execute the warmup via Nango (result suppressed)
+            const warmupStatus = await warmupManager.warmupProvider(
+                sessionId,
+                provider,
+                connectionId,
+                warmupCallback
+            );
+
+            this.logger.info('Provider warmup cached (not broadcast)', {
+                provider,
+                warmed: warmupStatus.warmed,
+                duration: warmupStatus.duration,
+            });
+
+            // Return status for internal tracking, but DO NOT emit to client
+            return warmupStatus;
+        } catch (error: any) {
+            this.logger.error('Provider warmup failed', {
+                provider,
+                error: error.message,
+                connectionId: '***',
+            });
+
+            return null;
+        }
+    }
+
+    /**
+     * Get the appropriate warmup callback for a provider.
+     */
+    private getProviderWarmupCallback(
+        provider: string,
+        connectionId: string,
+        providerConfigKey: string
+    ): (() => Promise<void>) | null {
+        switch (provider.toLowerCase()) {
+            case 'google':
+            case 'gmail':
+                return () => this.nangoService.warmupGoogle(connectionId, providerConfigKey);
+            case 'google-calendar':
+                return () => this.nangoService.warmupGoogleCalendar(connectionId, providerConfigKey);
+            case 'outlook':
+                return () => this.nangoService.warmupOutlook(connectionId, providerConfigKey);
+            case 'salesforce':
+            case 'salesforce-2':
+                return () => this.nangoService.warmupSalesforce(connectionId, providerConfigKey);
+            case 'notion':
+                return () => this.nangoService.warmupNotion(connectionId, providerConfigKey);
+            case 'slack':
+                return () => this.nangoService.warmupSlack(connectionId, providerConfigKey);
+            default:
+                return null;
+        }
+    }
 }
+
