@@ -87,19 +87,35 @@ class ConversationService extends events_1.EventEmitter {
         let initialUserQuery = '';
         if (!isSummaryMode) {
             const relevantCategories = getRelevantToolCategories(userMessage || history.at(-1)?.content || '');
+            logger.info('🔥 Tool category detection', {
+                userMessage: userMessage?.substring(0, 100),
+                detectedCategories: relevantCategories
+            });
             let filteredToolConfigs;
             if (this.providerAwareFilter && _userId) {
-                logger.info('Using provider-aware tool filtering', { userId: _userId, categories: relevantCategories });
+                logger.info('🔥 Using provider-aware tool filtering', { userId: _userId, categories: relevantCategories });
                 filteredToolConfigs = await this.providerAwareFilter.getToolsByCategoriesForUser(_userId, relevantCategories);
+                logger.info('🔥 Provider-aware filter returned tools', {
+                    userId: _userId,
+                    toolCount: filteredToolConfigs.length,
+                    toolNames: filteredToolConfigs.map(t => t.name)
+                });
             }
             else {
-                logger.warn('Provider-aware filtering not available, falling back to category-only filtering');
+                logger.warn('🔥 Provider-aware filtering not available, falling back to category-only filtering', {
+                    hasFilter: !!this.providerAwareFilter,
+                    hasUserId: !!_userId
+                });
                 filteredToolConfigs = this.toolConfigManager.getToolsByCategories(relevantCategories);
+                logger.info('🔥 Category-only filter returned tools', {
+                    toolCount: filteredToolConfigs.length,
+                    toolNames: filteredToolConfigs.map(t => t.name)
+                });
             }
             const groqTools = filteredToolConfigs.map(tool => {
                 const inputSchema = this.toolConfigManager.getToolInputSchema(tool.name);
                 if (!inputSchema) {
-                    logger.warn(`Skipping Groq definition for ${tool.name}: No input schema found.`);
+                    logger.warn(`🔥 Skipping Groq definition for ${tool.name}: No input schema found.`);
                     return null;
                 }
                 return {
@@ -107,7 +123,15 @@ class ConversationService extends events_1.EventEmitter {
                     function: { name: tool.name, description: tool.description, parameters: inputSchema }
                 };
             }).filter(Boolean);
+            logger.info('🔥 Groq tools after schema validation', {
+                groqToolCount: groqTools.length,
+                groqToolNames: groqTools.map((t) => t?.function?.name)
+            });
             toolsForStream = [...groqTools, PLANNER_META_TOOL];
+            logger.info('🔥 Final tools for stream (including planner)', {
+                totalToolCount: toolsForStream.length,
+                toolNames: toolsForStream.map(t => t?.function?.name || 'unknown')
+            });
             initialUserQuery = history.find(m => m.role === 'user')?.content || userMessage || '';
         }
         else {
@@ -193,13 +217,28 @@ class ConversationService extends events_1.EventEmitter {
             }
             let responseStream;
             if (toolsForThisStream.length > 0) {
-                logger.info('Conversational stream: Calling LLM with tools', {
+                logger.info('🔥 Conversational stream: Calling LLM with tools', {
                     toolCount: toolsForThisStream.length,
+                    toolNames: toolsForThisStream.map(t => t.function?.name || 'unknown'),
                     sessionId,
                     model: this.model,
                     messageCount: messagesForApi.length,
+                    messages: messagesForApi.map(m => ({
+                        role: m.role,
+                        contentLength: m.content?.length || 0,
+                        hasToolCalls: !!m.tool_calls,
+                        isToolMessage: m.role === 'tool'
+                    })),
+                    systemPromptLength: messagesForApi[0]?.content?.length || 0,
+                    userMessage: currentUserMessage || '[SUMMARY MODE]',
                     hasToolChoice: true
                 });
+                if (messagesForApi[0]?.role === 'system') {
+                    logger.info('🔥 System prompt being sent to LLM', {
+                        sessionId,
+                        prompt: messagesForApi[0].content?.substring(0, 500) + '...'
+                    });
+                }
                 responseStream = await this.client.chat.completions.create({
                     model: this.model,
                     messages: messagesForApi,
@@ -280,22 +319,28 @@ class ConversationService extends events_1.EventEmitter {
                     }
                 });
             }
-            logger.info('Conversational stream: LLM response complete', {
+            logger.info('🔥 Conversational stream: LLM response complete', {
                 sessionId,
                 streamId,
                 contentLength: accumulatedText?.length || 0,
                 hasContent: !!accumulatedText,
+                contentPreview: accumulatedText?.substring(0, 200),
                 hasToolCalls: !!(accumulatedToolCalls && accumulatedToolCalls.length > 0),
                 toolCallCount: accumulatedToolCalls?.length || 0,
+                toolCallNames: accumulatedToolCalls?.map(tc => tc.function?.name),
                 isEmpty: !accumulatedText && (!accumulatedToolCalls || accumulatedToolCalls.length === 0)
             });
             if (!accumulatedText && (!accumulatedToolCalls || accumulatedToolCalls.length === 0)) {
-                logger.warn('LLM returned empty response (no text, no tool calls)', {
+                logger.error('🔥🔥🔥 LLM returned EMPTY response (no text, no tool calls)', {
                     sessionId,
                     streamId,
                     isSummaryMode,
+                    userMessage: currentUserMessage?.substring(0, 100),
                     messageCount: messagesForApi.length,
-                    toolsAvailable: toolsForThisStream.length > 0
+                    toolsAvailable: toolsForThisStream.length > 0,
+                    toolCount: toolsForThisStream.length,
+                    toolNames: toolsForThisStream.map(t => t?.function?.name || 'unknown'),
+                    systemPromptPreview: messagesForApi[0]?.content?.substring(0, 300)
                 });
             }
             const assistantResponse = {
