@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ProviderAwareToolFilter = void 0;
+const providerAliases_1 = require("./providerAliases");
 class ProviderAwareToolFilter {
     constructor(toolConfigManager, sql, cacheService) {
         this.toolConfigManager = toolConfigManager;
@@ -19,16 +20,20 @@ class ProviderAwareToolFilter {
             console.log(`[ProviderAwareToolFilter] Fetching tools from database for user ${userId}`);
             const userProviders = await this.sql `
         SELECT DISTINCT provider
-        FROM user_connections
+        FROM connections
         WHERE user_id = ${userId}
       `;
-            const activeProviders = new Set(userProviders.map(row => row.provider));
+            const activeProviders = new Set();
+            userProviders.forEach(row => {
+                const providerKey = row.provider;
+                (0, providerAliases_1.getCanonicalProviderChain)(providerKey).forEach(key => activeProviders.add(key));
+            });
             const allTools = this.toolConfigManager.getAllTools();
             const availableTools = allTools.filter(tool => {
-                if (!tool.providerConfigKey) {
+                if (!tool.providerConfigKey)
                     return false;
-                }
-                return activeProviders.has(tool.providerConfigKey);
+                const normalizedToolKey = tool.providerConfigKey.trim().toLowerCase();
+                return activeProviders.has(normalizedToolKey);
             });
             console.log(`[ProviderAwareToolFilter] User ${userId} has ${activeProviders.size} active providers`);
             console.log(`[ProviderAwareToolFilter] Filtered ${allTools.length} tools down to ${availableTools.length} available tools`);
@@ -52,10 +57,15 @@ class ProviderAwareToolFilter {
         try {
             const userProviders = await this.sql `
         SELECT DISTINCT provider
-        FROM user_connections
+        FROM connections
         WHERE user_id = ${userId}
       `;
-            return new Set(userProviders.map(row => row.provider));
+            const providers = new Set();
+            userProviders.forEach(row => {
+                const providerKey = row.provider;
+                (0, providerAliases_1.getCanonicalProviderChain)(providerKey).forEach(key => providers.add(key));
+            });
+            return providers;
         }
         catch (error) {
             console.error('[ProviderAwareToolFilter] Error getting active providers:', error);
@@ -72,11 +82,13 @@ class ProviderAwareToolFilter {
             if (activeProviders.size === 0) {
                 return "No integrations configured. User cannot use any tools requiring external services.";
             }
+            const SALESFORCE_ALIASES = ['salesforce-ybzg', 'salesforce-2', 'salesforce'];
             const providerDescriptions = {
                 'google-mail': '✓ Gmail - Email operations (fetch, send)',
+                'google-mail-ynxw': '✓ Gmail - Email operations (fetch, send)',
                 'google-calendar': '✓ Google Calendar - Calendar events (fetch, create, update)',
                 'outlook': '✓ Microsoft Outlook - Email, calendar events, and contacts',
-                'salesforce-2': '✓ Salesforce - CRM operations (accounts, contacts, leads, deals, cases)',
+                'salesforce-ybzg': '✓ Salesforce - CRM operations (accounts, contacts, leads, deals, cases)',
                 'notion': '✓ Notion - Page and database operations',
             };
             const descriptions = [];
@@ -102,7 +114,7 @@ class ProviderAwareToolFilter {
             else if (hasOutlook) {
                 guidance += '- For CALENDAR operations: Use Outlook tools only (create_outlook_entity, fetch_outlook_entity with entityType="Event").\n';
             }
-            const hasGmail = activeProviders.has('google-mail');
+            const hasGmail = activeProviders.has('google-mail') || activeProviders.has('google-mail-ynxw');
             if (hasGmail && hasOutlook) {
                 guidance += '- For EMAIL operations: User has both Gmail and Outlook. Ask which one to use, or default to Gmail.\n';
             }
@@ -112,7 +124,8 @@ class ProviderAwareToolFilter {
             else if (hasOutlook) {
                 guidance += '- For EMAIL operations: Use Outlook tools only (create_outlook_entity, fetch_outlook_entity with entityType="Message").\n';
             }
-            if (activeProviders.has('salesforce-2')) {
+            const hasSalesforce = SALESFORCE_ALIASES.some(alias => activeProviders.has(alias));
+            if (hasSalesforce) {
                 guidance += '- For CRM operations: Use Salesforce tools (fetch_entity, create_entity, update_entity).\n';
             }
             if (activeProviders.has('notion')) {

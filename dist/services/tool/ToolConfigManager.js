@@ -43,7 +43,9 @@ class ToolConfigManager {
                         category: category,
                         display_name: tool.display_name || tool.name,
                         providerConfigKey: tool.providerConfigKey,
-                        parameters: tool.parameters
+                        parameters: tool.parameters,
+                        source: tool.source,
+                        cache_model: tool.cache_model
                     });
                 });
                 logger.info('ToolConfigManager: Grouped tools by category', {
@@ -169,6 +171,9 @@ class ToolConfigManager {
     getToolDefinition(toolName) {
         return this.getAllTools().find(t => t.name === toolName);
     }
+    getToolConfig(toolName) {
+        return this.getToolDefinition(toolName);
+    }
     getToolDisplayName(toolName) {
         const tool = this.getToolDefinition(toolName);
         return tool?.display_name || tool?.name || null;
@@ -225,6 +230,55 @@ class ToolConfigManager {
             }
         }
         return conditionallyMissing;
+    }
+    cleanSchemaForGroq(schema) {
+        if (!schema || !schema.properties)
+            return schema;
+        const cleaned = JSON.parse(JSON.stringify(schema));
+        const cleanProperty = (prop) => {
+            if (!prop || typeof prop !== 'object')
+                return prop;
+            if ('optional' in prop) {
+                delete prop.optional;
+            }
+            if (prop.properties && typeof prop.properties === 'object') {
+                for (const key in prop.properties) {
+                    prop.properties[key] = cleanProperty(prop.properties[key]);
+                }
+            }
+            if (prop.items && typeof prop.items === 'object') {
+                prop.items = cleanProperty(prop.items);
+            }
+            return prop;
+        };
+        if (cleaned.properties && typeof cleaned.properties === 'object') {
+            for (const key in cleaned.properties) {
+                cleaned.properties[key] = cleanProperty(cleaned.properties[key]);
+            }
+        }
+        return cleaned;
+    }
+    getProviderConfigKeyByType(type) {
+        const typeToToolMap = {
+            'gmail': 'fetch_emails',
+            'google-calendar': 'fetch_calendar_events',
+            'salesforce': 'fetch_entity',
+            'outlook': 'fetch_outlook_entity',
+            'notion': 'fetch_notion_page',
+        };
+        const toolName = typeToToolMap[type];
+        if (!toolName) {
+            logger.warn('Unknown provider type requested', { type });
+            return undefined;
+        }
+        const tool = this.getToolDefinition(toolName);
+        const providerKey = tool?.providerConfigKey;
+        logger.info('Resolved provider config key by type', {
+            type,
+            toolName,
+            providerKey
+        });
+        return providerKey;
     }
 }
 exports.ToolConfigManager = ToolConfigManager;

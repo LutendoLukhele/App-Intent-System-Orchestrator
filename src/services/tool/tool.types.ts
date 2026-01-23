@@ -26,6 +26,7 @@ export interface ToolCall {
     arguments: Record<string, any>;
     sessionId: string;
     userId: string;
+    provider?: string;
 }
 
 

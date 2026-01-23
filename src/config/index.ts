@@ -52,12 +52,12 @@ export const CONFIG = {
     OPEN_AI_API_KEY: getEnvVar('OPEN_AI_API_KEY', undefined, true), // Mark as critical
     GROQ_API_KEY: getEnvVar('GROQ_API_KEY', undefined, true),       // Mark as critical
     CONNECTION_ID: getEnvVar('CONNECTION_ID', '2154ba8d-ce48-4a46-b4d3-295f1aa9e450'), // User-specific, might not always be in .env
-    MODEL_NAME: getEnvVar('MODEL_NAME', 'openai/gpt-oss-20b'),
+    MODEL_NAME: getEnvVar('MODEL_NAME', 'llama-3.3-70b-versatile'),
     MAX_TOKENS: parseInt(getEnvVar('MAX_TOKENS', '1000')),
     STREAM_CHUNK_SIZE: parseInt(getEnvVar('STREAM_CHUNK_SIZE', '100')),
     TOOL_CONFIG_PATH: getEnvVar('TOOL_CONFIG_PATH', './config/tool-config.json'),
     NANGO_SECRET_KEY: getEnvVar('NANGO_SECRET_KEY', '2065f150-7636-4592-8418-5affe59a5d94'), // Potentially critical depending on usage
-    PROVIDER_CONFIG_KEY: getEnvVar('PROVIDER_CONFIG_KEY', 'salesforce-2'),
+    PROVIDER_CONFIG_KEY: getEnvVar('PROVIDER_CONFIG_KEY', 'salesforce-ybzg'),
     // CONNECTION_ID is user-specific and should not be a global config. It will be fetched dynamically.
     NANGO_BASE_URL: getEnvVar('NANGO_BASE_URL', 'https://api.nango.dev'),
     FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY'), // Often needed

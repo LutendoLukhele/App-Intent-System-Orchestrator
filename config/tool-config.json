@@ -38,7 +38,9 @@
     {
       "name": "fetch_emails",
       "description": "Fetch Gmail emails with advanced filtering options based on criteria like sender, subject, date, labels, or attachments.",
-      "providerConfigKey": "google-mail",
+      "source": "cache",
+      "cache_model": "GmailThread",
+      "providerConfigKey": "google-mail-ynxw",
       "category": "Email",
       "parameters": {
         "type": "object",
@@ -99,6 +101,8 @@
                   "isImportant": { "type": "boolean", "optional": true, "description": "Filter for emails marked as important by Gmail." },
                   "includeSpam": { "type": "boolean", "optional": true, "description": "Whether to include emails from the Spam folder. Defaults to false." },
                   "includeTrash": { "type": "boolean", "optional": true, "description": "Whether to include emails from the Trash folder. Defaults to false." },
+                  "semanticType": { "type": "string", "enum": ["security", "billing", "calendar", "support", "promotion", "general"], "optional": true, "description": "Filter by automatically detected email intent type. Use 'security' for alerts, 'billing' for invoices/payments, 'calendar' for meeting invites, 'support' for help tickets, 'promotion' for marketing emails." },
+                  "minConfidence": { "type": "number", "minimum": 0, "maximum": 1, "optional": true, "description": "Minimum semantic classification confidence (0.0-1.0). Use with semanticType to filter only high-confidence matches. Example: 0.8 for high confidence." },
                   "limit": { "type": "integer", "description": "Maximum number of emails to return (default/max may vary).", "optional": true },
                   "offset": { "type": "integer", "description": "Number of emails to skip (for pagination).", "optional": true }
                 }
@@ -113,7 +117,8 @@
     {
       "name": "send_email",
       "description": "Send an email via Gmail.",
-      "providerConfigKey": "google-mail",
+      "source": "action",
+      "providerConfigKey": "google-mail-ynxw",
       "category": "Email",
       "parameters": {
         "type": "object",
@@ -135,6 +140,8 @@
     {
       "name": "fetch_calendar_events",
       "description": "Fetch Google Calendar events. Use operation 'fetch' for a single event by ID, or 'fetch_list' to query multiple events with date range filters and search.",
+      "source": "cache",
+      "cache_model": "CalendarEvent",
       "providerConfigKey": "google-calendar",
       "category": "Calendar",
       "parameters": {
@@ -265,6 +272,7 @@
     {
       "name": "create_calendar_event",
       "description": "Create a new event, meeting, or appointment in Google Calendar with full support for attendees, reminders, recurrence, and conference data.",
+      "source": "action",
       "providerConfigKey": "google-calendar",
       "category": "Calendar",
       "parameters": {
@@ -456,6 +464,7 @@
     {
       "name": "update_calendar_event",
       "description": "Update existing Google Calendar event(s). Use 'update' for a single event or 'batch_update' for multiple events.",
+      "source": "action",
       "providerConfigKey": "google-calendar",
       "category": "Calendar",
       "parameters": {
@@ -545,6 +554,8 @@
     {
       "name": "fetch_notion_page",
       "description": "Fetch Notion pages or query database rows. Use operation 'fetch' for a single page by ID, or 'fetch_database' to query a database with filters and sorting.",
+      "source": "cache",
+      "cache_model": "NotionPage",
       "providerConfigKey": "notion",
       "category": "Productivity",
       "parameters": {
@@ -664,6 +675,7 @@
     {
       "name": "create_notion_page",
       "description": "Create new Notion pages in a database or as child pages. Use 'create' for a single page or 'batch_create' for multiple pages.",
+      "source": "action",
       "providerConfigKey": "notion",
       "category": "Productivity",
       "parameters": {
@@ -744,6 +756,7 @@
     {
       "name": "update_notion_page",
       "description": "Update existing Notion page(s) properties, archive status, icon, or cover. Use 'update' for a single page or 'batch_update' for multiple.",
+      "source": "action",
       "providerConfigKey": "notion",
       "category": "Productivity",
       "parameters": {
@@ -817,7 +830,8 @@
     {
       "name": "fetch_entity",
       "description": "Fetch Salesforce records (Account, Contact, Lead, Deal, Article, Case) with optional identifier or advanced filtering. Supports single record fetch by ID/field or bulk queries with complex filters, sorting, aggregation, and pagination.",
-      "providerConfigKey": "salesforce-2",
+      "source": "cache",
+      "providerConfigKey": "salesforce-ybzg",
       "category": "CRM",
       "parameters": {
         "type": "object",
@@ -832,7 +846,7 @@
               },
               "entityType": {
                 "type": "string",
-                "enum": ["Account", "Contact", "Lead", "Deal", "Article", "Case"],
+                "enum": ["Account", "Contact", "Lead", "Deal", "Opportunity", "Article", "Case"],
                 "description": "The type of Salesforce object to fetch."
               },
               "identifier": {
@@ -973,8 +987,9 @@
     },
     {
       "name": "create_entity",
-      "description": "Create a new Salesforce entity (Account, Contact, Lead, Deal, Article, or Case). Supports automatic field name mapping and batch operations with idempotency.",
-      "providerConfigKey": "salesforce-2",
+      "description": "Create Salesforce entity/entities (Account, Contact, Lead, Deal, Article, Case). SINGLE: Use 'fields' or 'record'. BATCH: Use 'records' array (max 100). Automatically validates fields and returns full created record(s) with metadata for conversational summaries.",
+      "source": "action",
+      "providerConfigKey": "salesforce-ybzg",
       "category": "CRM",
       "parameters": {
         "type": "object",
@@ -985,22 +1000,22 @@
               "operation": {
                 "type": "string",
                 "enum": ["create"],
-                "description": "The operation to perform. Must be 'create'."
+                "description": "Always 'create'. Batch mode auto-detected when 'records' array provided."
               },
               "entityType": {
                 "type": "string",
-                "enum": ["Account", "Contact", "Lead", "Deal", "Article", "Case"],
-                "description": "The type of Salesforce entity to create."
-              },
-              "record": {
-                "type": "object",
-                "description": "Entity fields to set for creating a SINGLE record. Use either 'record' or 'fields' (they're aliases). Field names should match Salesforce API names (e.g., FirstName, LastName, Email, Company, Phone, Title, etc.).",
-                "optional": true,
-                "additionalProperties": true
+                "enum": ["Account", "Contact", "Lead", "Deal", "Opportunity", "Article", "Case"],
+                "description": "REQUIRED. The type of Salesforce entity to create."
               },
               "fields": {
                 "type": "object",
-                "description": "Alias for 'record'. Use for creating a SINGLE record. Key-value pairs of Salesforce fields for the new record.",
+                "description": "SINGLE RECORD: Use this for creating ONE record. Key-value pairs of Salesforce API field names (e.g., FirstName, LastName, Email, Company, Phone, Title, Status, Rating). Either 'fields' or 'record', not both.",
+                "optional": true,
+                "additionalProperties": true
+              },
+              "record": {
+                "type": "object",
+                "description": "SINGLE RECORD: Alias for 'fields'. Use this for creating ONE record. Either 'fields' or 'record', not both.",
                 "optional": true,
                 "additionalProperties": true
               },
@@ -1011,7 +1026,7 @@
                   "additionalProperties": true,
                   "description": "Record object with Salesforce field names and values."
                 },
-                "description": "Use for creating MULTIPLE records in a batch (max 100). An array of record objects, each with Salesforce field names.",
+                "description": "BATCH MODE: Use this for creating MULTIPLE records at once (max 100). Array of record objects, each with Salesforce field names. Mutually exclusive with 'fields'/'record'.",
                 "optional": true
               },
               "parentId": {
@@ -1041,7 +1056,8 @@
     {
       "name": "update_entity",
       "description": "Update existing Salesforce record(s) (Account, Contact, Lead, Deal, Article, Case). Supports single record updates by ID/field or batch updates with automatic field name mapping and idempotency.",
-      "providerConfigKey": "salesforce-2",
+      "source": "action",
+      "providerConfigKey": "salesforce-ybzg",
       "category": "CRM",
       "parameters": {
         "type": "object",
@@ -1056,7 +1072,7 @@
               },
               "entityType": {
                 "type": "string",
-                "enum": ["Account", "Contact", "Lead", "Deal", "Article", "Case"],
+                "enum": ["Account", "Contact", "Lead", "Deal", "Opportunity", "Article", "Case"],
                 "description": "The type of Salesforce object to update."
               },
               "identifier": {
@@ -1136,6 +1152,7 @@
     {
       "name": "create_outlook_entity",
       "description": "Create Outlook entities: Message, Event, or Contact. Supports field validation, sanitization, and automatic parent ID handling for nested entities.",
+      "source": "action",
       "providerConfigKey": "outlook",
       "category": "Email & Calendar",
       "parameters": {
@@ -1181,6 +1198,7 @@
     {
       "name": "update_outlook_entity",
       "description": "Update Outlook entities: Message, Event, or Contact. Supports field validation and sanitization with patch operations.",
+      "source": "action",
       "providerConfigKey": "outlook",
       "category": "Email & Calendar",
       "parameters": {
@@ -1225,6 +1243,7 @@
     {
       "name": "fetch_outlook_entity",
       "description": "Fetch Outlook entities: Message, Event, Contact, MailFolder, Calendar, or Attachment. Supports ODATA filtering, pagination, and field selection.",
+      "source": "cache",
       "providerConfigKey": "outlook",
       "category": "Email & Calendar",
       "parameters": {
@@ -1279,6 +1298,7 @@
     {
       "name": "fetch_outlook_event_body",
       "description": "Fetch the body content of an Outlook event. Returns event subject, body content, and content type (text or HTML).",
+      "source": "cache",
       "providerConfigKey": "outlook",
       "category": "Email & Calendar",
       "parameters": {

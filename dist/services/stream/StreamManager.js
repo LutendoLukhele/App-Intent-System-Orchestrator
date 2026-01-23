@@ -6,7 +6,9 @@ const ws_1 = require("ws");
 class StreamManager extends BaseService_1.BaseService {
     constructor(config) {
         super(config);
+        this.MESSAGE_CACHE_TTL = 60000;
         this.connections = new Map();
+        this.recentMessages = new Map();
         this.chunkSize = config.chunkSize || 512;
         this.logger.info('StreamManager initialized', { chunkSize: this.chunkSize });
     }
@@ -58,18 +60,58 @@ class StreamManager extends BaseService_1.BaseService {
     }
     sendChunk(sessionId, chunk) {
         const ws = this.connections.get(sessionId);
-        if (ws && ws.readyState === ws_1.WebSocket.OPEN) {
-            try {
-                ws.send(JSON.stringify(chunk));
-                this.logger.debug('Sent chunk', { sessionId, type: chunk?.type });
-            }
-            catch (error) {
-                this.logger.error('Failed to stringify or send chunk', { sessionId, type: chunk?.type, error: error.message });
-            }
+        if (!ws || ws.readyState !== ws_1.WebSocket.OPEN) {
+            this.logger.warn('Attempted to send chunk to non-existent or closed connection', {
+                sessionId,
+                type: chunk?.type,
+                readyState: ws?.readyState
+            });
+            return;
         }
-        else {
-            this.logger.warn('Attempted to send chunk to non-existent or closed connection', { sessionId, type: chunk?.type, readyState: ws?.readyState });
+        const messageId = chunk.id ||
+            `${chunk.type}_${chunk.plan_id || chunk.action_id || chunk.messageId || Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        if (this.isDuplicate(sessionId, messageId)) {
+            this.logger.debug('Duplicate message suppressed', {
+                sessionId,
+                messageId,
+                type: chunk.type
+            });
+            return;
         }
+        try {
+            const chunkWithId = { ...chunk, id: messageId };
+            ws.send(JSON.stringify(chunkWithId));
+            this.trackMessage(sessionId, messageId);
+            this.logger.debug('Sent chunk', {
+                sessionId,
+                type: chunk?.type,
+                messageId
+            });
+        }
+        catch (error) {
+            this.logger.error('Failed to stringify or send chunk', {
+                sessionId,
+                type: chunk?.type,
+                error: error.message
+            });
+        }
+    }
+    isDuplicate(sessionId, messageId) {
+        const recentSet = this.recentMessages.get(sessionId);
+        return recentSet?.has(messageId) || false;
+    }
+    trackMessage(sessionId, messageId) {
+        if (!this.recentMessages.has(sessionId)) {
+            this.recentMessages.set(sessionId, new Set());
+        }
+        const recentSet = this.recentMessages.get(sessionId);
+        recentSet.add(messageId);
+        setTimeout(() => {
+            recentSet.delete(messageId);
+            if (recentSet.size === 0) {
+                this.recentMessages.delete(sessionId);
+            }
+        }, this.MESSAGE_CACHE_TTL);
     }
     async *createStream(content) {
         if (!content)

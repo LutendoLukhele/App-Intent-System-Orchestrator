@@ -20,8 +20,17 @@ export interface SearchSettings {
     country?: string;
 }
 
+export interface StreamCallbacks {
+    onToken?: (chunk: string) => void;
+    onReasoning?: (text: string) => void;
+    onToolCall?: (toolCalls: unknown) => void;
+    onComplete?: (response: GroqResponse) => void;
+    onError?: (error: Error) => void;
+}
+
 interface ExecuteOptions {
     searchSettings?: SearchSettings;
+    callbacks?: StreamCallbacks;
 }
 
 export class GroqService {
@@ -79,12 +88,58 @@ export class GroqService {
                 ...(options.searchSettings ? { search_settings: options.searchSettings } : {}),
             });
 
+            let combinedContent = '';
+            let combinedReasoning = '';
+            let model = '';
+            let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
+
             for await (const chunk of stream) {
+                // Extract data for callbacks
+                if (chunk.model) model = chunk.model;
+                if ((chunk as any).usage) {
+                    usage = { ...usage, ...(chunk as any).usage };
+                }
+
+                const choice = chunk.choices?.[0];
+                const delta = choice?.delta;
+
+                // Call onToken callback
+                if (delta?.content && options.callbacks?.onToken) {
+                    options.callbacks.onToken(delta.content);
+                    combinedContent += delta.content;
+                }
+
+                // Call onReasoning callback
+                if ((delta as any)?.reasoning && options.callbacks?.onReasoning) {
+                    options.callbacks.onReasoning((delta as any).reasoning);
+                    combinedReasoning += (delta as any).reasoning;
+                }
+
+                // Call onToolCall callback
+                if (delta?.tool_calls && options.callbacks?.onToolCall) {
+                    options.callbacks.onToolCall(delta.tool_calls);
+                }
+
                 yield chunk;
             }
 
+            // Call onComplete callback with accumulated response
+            if (options.callbacks?.onComplete) {
+                options.callbacks.onComplete({
+                    content: combinedContent,
+                    model,
+                    usage,
+                    reasoning: combinedReasoning || undefined,
+                    executedTools: undefined
+                });
+            }
+
         } catch (error: any) {
-            throw new Error(`Groq API error: ${error?.message ?? 'Unknown error'}`);
+            const err = new Error(`Groq API error: ${error?.message ?? 'Unknown error'}`);
+            if (options.callbacks?.onError) {
+                options.callbacks.onError(err);
+            }
+            throw err;
         }
     }
 }

@@ -2,11 +2,13 @@
 
 import Groq from 'groq-sdk';
 import winston from 'winston';
+import Redis from 'ioredis';
 import { FOLLOW_UP_PROMPT_TEMPLATE } from './followUpPrompt';
 import { ToolCall } from './tool/tool.types';
 import { Run, ToolExecutionStep } from './tool/run.types';
 import { ActiveAction } from '../action-launcher.service';
 import { ToolConfigManager } from './tool/ToolConfigManager';
+import { EMAIL_COMPRESSION_CONFIG, compressEmailData, compressCRMData } from './emailCompressionConfig';
 
 const logger = winston.createLogger({
     level: 'info',
@@ -16,12 +18,14 @@ const logger = winston.createLogger({
 
 export class FollowUpService {
   groqClient: any;
+  toolConfigManager = new ToolConfigManager();
+
     constructor(
         private client: Groq,
         private model: string,
-        private maxTokens: number
+        private maxTokens: number,
+        private redis?: Redis
     ) {}
-  toolConfigManager = new ToolConfigManager();
 
     /**
      * Analyzes the result of a completed action to generate a conversational summary
@@ -29,7 +33,8 @@ export class FollowUpService {
      */
   public async generateFollowUp(
     run: Run,
-    nextStep: ToolExecutionStep
+    nextStep: ToolExecutionStep,
+    sessionId?: string
   ): Promise<{ summary: string | null; nextToolCall: ToolCall | null }> {
     const lastCompletedStep = [...run.toolExecutionPlan].reverse().find(s => s.status === 'completed');
     if (!lastCompletedStep || !lastCompletedStep.result) {
@@ -37,12 +42,68 @@ export class FollowUpService {
       return { summary: null, nextToolCall: null };
     }
 
-    const toolResultJson = JSON.stringify(lastCompletedStep.result.data, null, 2);
+    // Retrieve full result from Redis if it was stored there
+    let resultData = lastCompletedStep.result.data;
+    if (sessionId && this.redis && typeof resultData === 'object' && resultData.__note === 'Full result stored in Redis') {
+        try {
+            const redisKey = resultData.__redisKey;
+            const storedResult = await this.redis.get(redisKey);
+            if (storedResult) {
+                resultData = JSON.parse(storedResult);
+                logger.info('FollowUpService: Retrieved full result from Redis', { 
+                    sessionId, 
+                    redisKey, 
+                    size: JSON.stringify(resultData).length 
+                });
+            }
+        } catch (error) {
+            logger.warn('FollowUpService: Failed to retrieve result from Redis, using reference', { 
+                error: error instanceof Error ? error.message : String(error),
+                sessionId 
+            });
+        }
+    }
+
+    // Compress email data for follow-up generation to reduce token usage
+    let processedData = resultData;
+    
+    // Handle both array format and object format (with records array)
+    let recordArray = Array.isArray(resultData) ? resultData : 
+                    (resultData?.records && Array.isArray(resultData.records)) ? resultData.records : 
+                    null;
+    
+    if (recordArray && recordArray.length > 0) {
+        // Detect if this is CRM data or email data
+        const sampleRecord = recordArray[0];
+        const isCRMData = !!sampleRecord?.attributes?.type;
+        
+        const compressionResult = isCRMData
+            ? compressCRMData(resultData, EMAIL_COMPRESSION_CONFIG.MAX_EMAILS)
+            : compressEmailData(
+                resultData,
+                EMAIL_COMPRESSION_CONFIG.MAX_EMAILS,
+                EMAIL_COMPRESSION_CONFIG.BODY_CHAR_LIMIT
+            );
+        
+        processedData = compressionResult.compressed;
+        
+        logger.info('FollowUpService: Data compression complete', {
+            dataType: isCRMData ? 'CRM' : 'Email',
+            entityType: (compressionResult as any).entityType,
+            originalCount: recordArray.length,
+            compressedCount: compressionResult.wasCompressed ? EMAIL_COMPRESSION_CONFIG.MAX_EMAILS : 'N/A',
+            originalSize: compressionResult.originalSize,
+            compressedSize: compressionResult.compressedSize,
+            compressionRatio: compressionResult.compressionRatio
+        });
+    }
+
+    const toolResultJson = JSON.stringify(processedData, null, 2);
     const nextToolName = nextStep.toolCall.name;
     const nextToolSchema = this.toolConfigManager.getToolInputSchema(nextToolName);
     const nextToolDescription = this.toolConfigManager.getToolDefinition(nextToolName)?.description || 'No description available.';
 
-    // 2. Construct a prompt for the LLM.
+    // Construct a prompt for the LLM.
     const prompt = FOLLOW_UP_PROMPT_TEMPLATE
     .replace('{{USER_INITIAL_QUERY}}', run.userInput)
     .replace('{{PREVIOUS_TOOL_RESULT_JSON}}', toolResultJson)
@@ -51,7 +112,7 @@ export class FollowUpService {
       .replace('{{NEXT_TOOL_DESCRIPTION}}', nextToolDescription)
       .replace('{{NEXT_TOOL_PARAMETERS_JSON}}', JSON.stringify(nextToolSchema, null, 2));
 
-    // 3. Call the LLM to generate the conversational response.
+    // Call the LLM to generate the conversational response.
     try {
       const chatCompletion = await this.client.chat.completions.create({
         messages: [{ role: 'user', content: prompt }],
@@ -72,10 +133,49 @@ export class FollowUpService {
 
       const nextToolCall: ToolCall | null = nextToolCallArgs ? { ...nextStep.toolCall, arguments: nextToolCallArgs } : null;
 
+      logger.info('FollowUpService: Generated follow-up response', { 
+          runId: run.id,
+          hasSummary: !!summary,
+          summaryLength: summary?.length || 0,
+          hasNextToolCall: !!nextToolCall 
+      });
+
       return { summary, nextToolCall };
     } catch (error) {
       logger.error('Failed to generate AI follow-up from Groq.', { error });
       return { summary: `The action '${lastCompletedStep.result.toolName}' completed successfully.`, nextToolCall: null };
     }
+  }
+
+  /**
+   * Extracts CRM-specific summary fields from entity records.
+   * Maps entity types to relevant fields and extracts key data points.
+   */
+  private _extractCRMSummaryFields(entityType: string, records: any[]): any[] {
+    const fieldMappings: { [key: string]: string[] } = {
+      'Lead': ['Id', 'FirstName', 'LastName', 'Email', 'Company', 'Status', 'Rating', 'Phone'],
+      'Account': ['Id', 'Name', 'Industry', 'AnnualRevenue', 'Phone', 'WebsiteURL', 'NumberOfEmployees'],
+      'Contact': ['Id', 'FirstName', 'LastName', 'Email', 'Phone', 'AccountId', 'Title', 'Department'],
+      'Case': ['Id', 'CaseNumber', 'Subject', 'Status', 'Priority', 'CreatedDate', 'AccountId', 'ContactId'],
+      'Opportunity': ['Id', 'Name', 'StageName', 'Amount', 'CloseDate', 'Probability', 'AccountId'],
+      'Article': ['Id', 'Title', 'UrlName', 'PublishStatus', 'CreatedDate', 'CreatedById']
+    };
+
+    const relevantFields = fieldMappings[entityType] || ['Id', 'Name', 'Email', 'Status'];
+    const summaryRecords: any[] = [];
+
+    for (const record of records.slice(0, 5)) {  // Summarize first 5 records
+      const summary: any = {};
+      for (const field of relevantFields) {
+        if (field in record) {
+          summary[field] = record[field];
+        }
+      }
+      if (Object.keys(summary).length > 0) {
+        summaryRecords.push(summary);
+      }
+    }
+
+    return summaryRecords;
   }
 }

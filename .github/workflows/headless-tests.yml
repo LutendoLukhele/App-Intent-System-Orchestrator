@@ -1,0 +1,296 @@
+name: Headless Testing Pipeline
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+
+env:
+  NODE_VERSION: '18'
+  TEST_LOG_LEVEL: 'info'
+
+jobs:
+  # Job 1: Setup and lint
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: TypeScript compile check
+        run: npx tsc --noEmit
+
+  # Job 2: Unit and E2E Tests
+  test-e2e:
+    runs-on: ubuntu-latest
+    needs: setup
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cortex_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Create test environment
+        run: |
+          cat > .env.test << EOF
+          TEST_WS_URL=ws://localhost:3000
+          TEST_API_URL=http://localhost:3000/api
+          TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cortex_test
+          TEST_REDIS_URL=redis://localhost:6379
+          TEST_LOG_LEVEL=${{ env.TEST_LOG_LEVEL }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          NANGO_API_KEY=${{ secrets.NANGO_API_KEY }}
+          NANGO_SECRET_KEY=${{ secrets.NANGO_SECRET_KEY }}
+          EOF
+      
+      - name: Start server
+        run: npm run dev &
+        env:
+          NODE_ENV: test
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 3000; then
+              echo "Server started"
+              exit 0
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+          echo "Server failed to start"
+          exit 1
+      
+      - name: Run E2E tests
+        run: npm test -- tests/headless-e2e.test.ts
+        env:
+          NODE_ENV: test
+      
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-results
+          path: test-results/
+
+  # Job 3: Load Testing
+  load-test:
+    runs-on: ubuntu-latest
+    needs: setup
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: cortex_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+      
+      redis:
+        image: redis:7
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 6379:6379
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      
+      - name: Install dependencies
+        run: npm ci
+      
+      - name: Create test environment
+        run: |
+          cat > .env.test << EOF
+          TEST_WS_URL=ws://localhost:3000
+          TEST_API_URL=http://localhost:3000/api
+          TEST_DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cortex_test
+          TEST_REDIS_URL=redis://localhost:6379
+          TEST_LOG_LEVEL=${{ env.TEST_LOG_LEVEL }}
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          NANGO_API_KEY=${{ secrets.NANGO_API_KEY }}
+          NANGO_SECRET_KEY=${{ secrets.NANGO_SECRET_KEY }}
+          EOF
+      
+      - name: Start server
+        run: npm run dev &
+        env:
+          NODE_ENV: test
+      
+      - name: Wait for server
+        run: |
+          for i in {1..30}; do
+            if nc -z localhost 3000; then
+              echo "Server started"
+              exit 0
+            fi
+            echo "Waiting for server... ($i/30)"
+            sleep 2
+          done
+          echo "Server failed to start"
+          exit 1
+      
+      - name: Run load tests
+        run: |
+          bash tests/headless-load-test.sh 10 10 5 load-test-results.json
+          if [ $? -ne 0 ]; then
+            echo "Load test failed"
+            exit 1
+          fi
+      
+      - name: Parse load test results
+        if: always()
+        run: |
+          echo "=== Load Test Results ==="
+          cat load-test-results.json | jq '.'
+      
+      - name: Upload load test results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: load-test-results
+          path: load-test-results.json
+
+  # Job 4: Performance Regression Check
+  perf-regression:
+    runs-on: ubuntu-latest
+    needs: [test-e2e, load-test]
+    if: always()
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download load test results
+        uses: actions/download-artifact@v3
+        with:
+          name: load-test-results
+      
+      - name: Check performance regression
+        run: |
+          echo "Checking performance against baseline..."
+          
+          # Parse results
+          AVG_LATENCY=$(cat load-test-results.json | jq '.metrics.avg_latency')
+          SUCCESS_RATE=$(cat load-test-results.json | jq '.metrics.success_rate')
+          BASELINE_AVG=1500  # 1.5 seconds baseline
+          BASELINE_SUCCESS=95  # 95% baseline
+          
+          echo "Current avg latency: ${AVG_LATENCY}ms (baseline: ${BASELINE_AVG}ms)"
+          echo "Current success rate: ${SUCCESS_RATE}% (baseline: ${BASELINE_SUCCESS}%)"
+          
+          # Check thresholds
+          REGRESSION=0
+          if (( $(echo "$AVG_LATENCY > $BASELINE_AVG * 1.2" | bc -l) )); then
+            echo "❌ Latency increased by >20%"
+            REGRESSION=1
+          fi
+          
+          if (( $(echo "$SUCCESS_RATE < $BASELINE_SUCCESS" | bc -l) )); then
+            echo "❌ Success rate below baseline"
+            REGRESSION=1
+          fi
+          
+          if [ $REGRESSION -eq 0 ]; then
+            echo "✅ Performance OK"
+          else
+            exit 1
+          fi
+
+  # Job 5: Summary
+  summary:
+    runs-on: ubuntu-latest
+    needs: [setup, test-e2e, load-test, perf-regression]
+    if: always()
+    
+    steps:
+      - name: Test Summary
+        run: |
+          echo "=== Test Pipeline Summary ==="
+          echo "Setup: ${{ needs.setup.result }}"
+          echo "E2E Tests: ${{ needs.test-e2e.result }}"
+          echo "Load Tests: ${{ needs.load-test.result }}"
+          echo "Performance Check: ${{ needs.perf-regression.result }}"
+          
+          if [ "${{ needs.test-e2e.result }}" = "failure" ]; then
+            echo "❌ E2E tests failed"
+            exit 1
+          fi
+          
+          if [ "${{ needs.load-test.result }}" = "failure" ]; then
+            echo "❌ Load tests failed"
+            exit 1
+          fi
+          
+          if [ "${{ needs.perf-regression.result }}" = "failure" ]; then
+            echo "⚠️  Performance regression detected"
+            # Don't fail, just warn
+          fi
+          
+          echo "✅ All critical checks passed"
+      
+      - name: Notify Slack (optional)
+        if: failure()
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ job.status }}
+          text: 'Headless tests failed on ${{ github.ref }}'
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action

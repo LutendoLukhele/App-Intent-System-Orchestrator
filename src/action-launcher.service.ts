@@ -150,10 +150,22 @@ export class ActionLauncherService extends EventEmitter {
     }
 
     if (clientActionsToConfirm.length > 0) {
-      const analysisText = `The '${clientActionsToConfirm[0].toolDisplayName}' action is ready. Please review and confirm.`;
+      const actionCount = clientActionsToConfirm.length;
+      const analysisText = actionCount === 1
+        ? `The '${clientActionsToConfirm[0].toolDisplayName}' action is ready. Click Execute to proceed.`
+        : `${actionCount} actions are ready. Click Execute to proceed.`;
+
       this.emit('send_chunk', sessionId, {
         type: 'action_confirmation_required',
-        content: { actions: clientActionsToConfirm, analysis: analysisText, messageId },
+        content: {
+          actions: clientActionsToConfirm,
+          analysis: analysisText,
+          messageId
+        },
+        showExecuteButton: true, // Tell client to show execute button
+        autoExecute: false, // Explicit flag that auto-execute is disabled
+        plan_id: sessionId, // Include plan ID for tracking
+        message: analysisText
       } as StreamChunk);
     }
   }

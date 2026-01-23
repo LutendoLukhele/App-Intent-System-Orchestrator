@@ -102,10 +102,21 @@ class ActionLauncherService extends events_1.EventEmitter {
             });
         }
         if (clientActionsToConfirm.length > 0) {
-            const analysisText = `The '${clientActionsToConfirm[0].toolDisplayName}' action is ready. Please review and confirm.`;
+            const actionCount = clientActionsToConfirm.length;
+            const analysisText = actionCount === 1
+                ? `The '${clientActionsToConfirm[0].toolDisplayName}' action is ready. Click Execute to proceed.`
+                : `${actionCount} actions are ready. Click Execute to proceed.`;
             this.emit('send_chunk', sessionId, {
                 type: 'action_confirmation_required',
-                content: { actions: clientActionsToConfirm, analysis: analysisText, messageId },
+                content: {
+                    actions: clientActionsToConfirm,
+                    analysis: analysisText,
+                    messageId
+                },
+                showExecuteButton: true,
+                autoExecute: false,
+                plan_id: sessionId,
+                message: analysisText
             });
         }
     }

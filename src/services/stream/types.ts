@@ -53,7 +53,8 @@ export interface StreamChunk {
     | 'content'
     | 'error'
     | 'stream_end'
-    | 'planner_status'; // ✅ add this
+    | 'planner_status'
+    | 'interpret_event'; // ✅ add this for structured interpret events
   content?: any;
   messageId?: string;
   isFinal?: boolean;
@@ -64,6 +65,8 @@ export interface StreamChunk {
   status?: string;
   toolName?: string;
   result?: any;
+  event?: string; // Event name for interpret_event type
+  metadata?: any; // Additional metadata
 }
 
 

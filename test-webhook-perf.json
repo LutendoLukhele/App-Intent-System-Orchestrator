@@ -1,0 +1,18 @@
+{
+  "type": "sync",
+  "connectionId": "90a6fb46-ec59-4cee-b297-8dc70d81ec07",
+  "providerConfigKey": "google-mail-ynxw",
+  "model": "GmailEmail",
+  "syncName": "gmail-emails",
+  "responseResults": {
+    "added": [
+      {"id": "perf1", "from": "test@test.com", "subject": "Test 1", "body_text": "Testing", "date": "2026-01-06T00:00:00.000Z"},
+      {"id": "perf2", "from": "test@test.com", "subject": "Test 2", "body_text": "Testing", "date": "2026-01-06T00:00:00.000Z"},
+      {"id": "perf3", "from": "test@test.com", "subject": "Test 3", "body_text": "Testing", "date": "2026-01-06T00:00:00.000Z"},
+      {"id": "perf4", "from": "test@test.com", "subject": "Test 4", "body_text": "Testing", "date": "2026-01-06T00:00:00.000Z"},
+      {"id": "perf5", "from": "test@test.com", "subject": "Test 5", "body_text": "Testing", "date": "2026-01-06T00:00:00.000Z"}
+    ],
+    "updated": [],
+    "deleted": []
+  }
+}

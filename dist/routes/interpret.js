@@ -12,6 +12,51 @@ const session_service_1 = require("../services/session.service");
 const document_service_1 = require("../services/document.service");
 const artifact_generator_service_1 = require("../services/artifact-generator.service");
 const router = express_1.default.Router();
+router.get('/stream', async (req, res) => {
+    const requestId = generateRequestId();
+    const startTime = Date.now();
+    try {
+        const { query, documentIds, enableArtifacts, searchSettings } = req.query;
+        if (!query) {
+            res.status(400).json({ error: 'Query is required', id: requestId });
+            return;
+        }
+        const parsedDocumentIds = documentIds ? JSON.parse(documentIds) : undefined;
+        const parsedEnableArtifacts = enableArtifacts === 'true';
+        const parsedSearchSettings = searchSettings ? JSON.parse(searchSettings) : undefined;
+        const documentContext = parsedDocumentIds && parsedDocumentIds.length
+            ? await document_service_1.documentService.getDocuments(parsedDocumentIds)
+            : [];
+        const { mode, entities } = await router_service_1.routerService.detectIntent(query);
+        const groqPrompt = prompt_generator_service_1.promptGeneratorService.generatePrompt(mode, query, entities, {
+            sessionContext: null,
+            documentContext,
+            enableArtifacts: parsedEnableArtifacts,
+        });
+        await handleStreamingInterpret({
+            req,
+            res,
+            requestId,
+            mode,
+            query,
+            entities,
+            groqPrompt,
+            sessionContext: null,
+            enableArtifacts: parsedEnableArtifacts,
+            searchSettings: parsedSearchSettings,
+            startTime,
+        });
+    }
+    catch (error) {
+        prepareSseHeaders(res);
+        sendSse(res, 'error', {
+            requestId,
+            status: 'error',
+            message: error?.message ?? 'Failed to process stream request',
+        });
+        res.end();
+    }
+});
 router.post('/', async (req, res) => {
     const requestId = generateRequestId();
     const startTime = Date.now();
@@ -280,6 +325,40 @@ async function handleStreamingInterpret(ctx) {
             interpretiveResponse = response_parser_service_1.responseParserService.buildFallbackResponse(groqResponse.content, mode, groqResponse, parseError?.message ?? 'Failed to parse Groq response.');
         }
         interpretiveResponse.metadata.processingTimeMs = Date.now() - startTime;
+        if (interpretiveResponse.hero?.headline) {
+            sendSse(res, 'title_generated', { title: interpretiveResponse.hero.headline });
+        }
+        if (interpretiveResponse.hero?.subheadline) {
+            sendSse(res, 'subtitle_generated', { subtitle: interpretiveResponse.hero.subheadline });
+        }
+        if (interpretiveResponse.hero?.imageUrl) {
+            sendSse(res, 'hero_image_set', { hero: interpretiveResponse.hero });
+        }
+        for (const segment of interpretiveResponse.segments || []) {
+            sendSse(res, 'segment_added', { segment });
+        }
+        for (const source of interpretiveResponse.sources || []) {
+            sendSse(res, 'source_added', { source });
+        }
+        const imageSegments = (interpretiveResponse.segments || []).filter(s => s.type === 'image');
+        for (const imageSegment of imageSegments) {
+            sendSse(res, 'image_added', { image: imageSegment });
+        }
+        if (Array.isArray(interpretiveResponse.hero?.imageCandidates)) {
+            for (const imageCandidate of interpretiveResponse.hero.imageCandidates) {
+                sendSse(res, 'image_added', { image: imageCandidate });
+            }
+        }
+        const initialImageCount = imageSegments.length + (interpretiveResponse.hero?.imageCandidates?.length || 0);
+        sendSse(res, 'metadata_update', {
+            metadata: {
+                segmentCount: interpretiveResponse.segments?.length || 0,
+                sourceCount: interpretiveResponse.sources?.length || 0,
+                imageCount: initialImageCount,
+                processingTimeMs: interpretiveResponse.metadata.processingTimeMs,
+                mode
+            }
+        });
         const enrichmentNotes = {};
         const enrichmentImageCandidates = [];
         const enrichmentDefinitions = [
@@ -316,6 +395,8 @@ async function handleStreamingInterpret(ctx) {
                 });
                 const parsedEnrichment = response_parser_service_1.responseParserService.parseEnrichmentResponse(enrichmentResponse.content);
                 enrichmentNotes[definition.key] = enrichmentResponse.reasoning;
+                let newSourcesCount = 0;
+                let newSegmentsCount = 0;
                 const localToGlobalIndex = new Map();
                 parsedEnrichment.sources.forEach((source, idx) => {
                     const existingIndex = interpretiveResponse.sources.findIndex((existing) => existing.url === source.url);
@@ -323,11 +404,14 @@ async function handleStreamingInterpret(ctx) {
                         localToGlobalIndex.set(idx + 1, existingIndex + 1);
                     }
                     else {
-                        interpretiveResponse.sources.push({
+                        const newSource = {
                             ...source,
                             index: interpretiveResponse.sources.length + 1,
-                        });
+                        };
+                        interpretiveResponse.sources.push(newSource);
                         localToGlobalIndex.set(idx + 1, interpretiveResponse.sources.length);
+                        sendSse(res, 'source_added', { source: newSource });
+                        newSourcesCount++;
                     }
                 });
                 parsedEnrichment.segments.forEach((segment) => {
@@ -342,7 +426,17 @@ async function handleStreamingInterpret(ctx) {
                         segment.title = `${segment.title} (${definition.key})`;
                     }
                     interpretiveResponse.segments.push(segment);
+                    sendSse(res, 'segment_added', { segment });
+                    newSegmentsCount++;
+                    if (segment.type === 'image') {
+                        sendSse(res, 'image_added', { image: segment });
+                    }
                 });
+                if (Array.isArray(parsedEnrichment.imageCandidates)) {
+                    for (const imageCandidate of parsedEnrichment.imageCandidates) {
+                        sendSse(res, 'image_added', { image: imageCandidate });
+                    }
+                }
                 enrichmentImageCandidates.push(...parsedEnrichment.imageCandidates);
                 sendSse(res, 'enrichment_complete', {
                     key: definition.key,
@@ -406,6 +500,19 @@ async function handleStreamingInterpret(ctx) {
             await session_service_1.sessionService.addInterpretiveResult(sessionContext.id, interpretiveResponse);
         }
         interpretiveResponse.metadata.processingTimeMs = Date.now() - startTime;
+        const finalImageCount = (interpretiveResponse.segments || []).filter(s => s.type === 'image').length +
+            (interpretiveResponse.hero?.imageCandidates?.length || 0);
+        sendSse(res, 'metadata_update', {
+            metadata: {
+                segmentCount: interpretiveResponse.metadata.segmentCount,
+                sourceCount: interpretiveResponse.metadata.sourceCount,
+                imageCount: finalImageCount,
+                processingTimeMs: Date.now() - startTime,
+                groqModel: interpretiveResponse.metadata.groqModel,
+                groqTokens: interpretiveResponse.metadata.groqTokens,
+                mode
+            }
+        });
         sendSse(res, 'complete', {
             requestId,
             status: 'complete',

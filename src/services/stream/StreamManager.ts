@@ -9,6 +9,10 @@ export class StreamManager extends BaseService {
   private connections: Map<string, WebSocket>;
   private readonly chunkSize: number;
 
+  // Message deduplication support
+  private recentMessages: Map<string, Set<string>>; // sessionId → Set of message IDs
+  private readonly MESSAGE_CACHE_TTL = 60000; // 1 minute TTL for message deduplication
+
   constructor(config: StreamConfig) {
     // Ensure logger is initialized correctly, either via BaseService or directly
     // super({ logger: config.logger }); // Assuming BaseService handles logger setup
@@ -17,6 +21,7 @@ export class StreamManager extends BaseService {
     super(config); // Assuming BaseService constructor handles config/logger
 
     this.connections = new Map();
+    this.recentMessages = new Map();
     this.chunkSize = config.chunkSize || 512; // Default chunk size if not provided
     this.logger.info('StreamManager initialized', { chunkSize: this.chunkSize });
   }
@@ -108,25 +113,92 @@ export class StreamManager extends BaseService {
 
 
   /**
-   * Sends a data chunk to a specific client via WebSocket.
+   * Sends a data chunk to a specific client via WebSocket with deduplication.
    * @param sessionId - The target session ID.
    * @param chunk - The data chunk object to send (must be serializable to JSON).
    */
   sendChunk(sessionId: string, chunk: StreamChunk | any): void { // Allow any object type for flexibility
     const ws = this.connections.get(sessionId);
+
     // Check if connection exists and is open before sending
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      try {
-        ws.send(JSON.stringify(chunk));
-         this.logger.debug('Sent chunk', { sessionId, type: chunk?.type });
-      } catch (error: any) {
-         this.logger.error('Failed to stringify or send chunk', { sessionId, type: chunk?.type, error: error.message });
-         // Optionally try to remove the connection if sending fails persistently
-         // this.removeConnection(sessionId);
-      }
-    } else {
-       this.logger.warn('Attempted to send chunk to non-existent or closed connection', { sessionId, type: chunk?.type, readyState: ws?.readyState });
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      this.logger.warn('Attempted to send chunk to non-existent or closed connection', {
+        sessionId,
+        type: chunk?.type,
+        readyState: ws?.readyState
+      });
+      return;
     }
+
+    // Generate message ID for deduplication
+    const messageId = chunk.id ||
+      `${chunk.type}_${chunk.plan_id || chunk.action_id || chunk.messageId || Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Check if already sent recently (deduplication)
+    if (this.isDuplicate(sessionId, messageId)) {
+      this.logger.debug('Duplicate message suppressed', {
+        sessionId,
+        messageId,
+        type: chunk.type
+      });
+      return;
+    }
+
+    try {
+      // Add message ID to chunk and send
+      const chunkWithId = { ...chunk, id: messageId };
+      ws.send(JSON.stringify(chunkWithId));
+
+      // Track this message
+      this.trackMessage(sessionId, messageId);
+
+      this.logger.debug('Sent chunk', {
+        sessionId,
+        type: chunk?.type,
+        messageId
+      });
+    } catch (error: any) {
+      this.logger.error('Failed to stringify or send chunk', {
+        sessionId,
+        type: chunk?.type,
+        error: error.message
+      });
+      // Optionally try to remove the connection if sending fails persistently
+      // this.removeConnection(sessionId);
+    }
+  }
+
+  /**
+   * Check if a message has been sent recently (deduplication check)
+   * @param sessionId - The session ID
+   * @param messageId - The message ID to check
+   * @returns True if this is a duplicate message
+   */
+  private isDuplicate(sessionId: string, messageId: string): boolean {
+    const recentSet = this.recentMessages.get(sessionId);
+    return recentSet?.has(messageId) || false;
+  }
+
+  /**
+   * Track a sent message for deduplication with automatic cleanup after TTL
+   * @param sessionId - The session ID
+   * @param messageId - The message ID to track
+   */
+  private trackMessage(sessionId: string, messageId: string): void {
+    if (!this.recentMessages.has(sessionId)) {
+      this.recentMessages.set(sessionId, new Set());
+    }
+
+    const recentSet = this.recentMessages.get(sessionId)!;
+    recentSet.add(messageId);
+
+    // Clean up after TTL
+    setTimeout(() => {
+      recentSet.delete(messageId);
+      if (recentSet.size === 0) {
+        this.recentMessages.delete(sessionId);
+      }
+    }, this.MESSAGE_CACHE_TTL);
   }
 
   /**

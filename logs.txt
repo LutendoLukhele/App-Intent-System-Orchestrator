@@ -1,0 +1,61 @@
+
+> src@1.0.0 start
+> node dist/index.js
+
+[config/index.ts] Starting configuration loading. NODE_ENV: development
+[config/index.ts] Current working directory (process.cwd()): /Users/lutendolukhele/Desktop/backedn-main
+[config/index.ts] .env file loaded successfully from /Users/lutendolukhele/Desktop/backedn-main/.env.
+[config/index.ts] Final CONFIG object (Firebase relevant parts):
+[config/index.ts]   CONFIG.FIREBASE_PROJECT_ID: 'assistant-b00f5'
+info: Firebase Admin SDK initialized successfully.
+{"configStructure":["tools","beats","providers"],"level":"info","message":"ToolConfigManager: Loading tool configuration","path":"/Users/lutendolukhele/Desktop/backedn-main/config/tool-config.json","timestamp":"2026-01-21T18:39:08.233Z"}
+{"level":"info","message":"ToolConfigManager: Detected flat tools array structure","timestamp":"2026-01-21T18:39:08.234Z"}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Grouped tools by category","timestamp":"2026-01-21T18:39:08.234Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}]}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Validation on init","timestamp":"2026-01-21T18:39:08.235Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}],"totalCategories":6,"totalTools":16}
+{"level":"info","message":"✅ All critical tools validated successfully","timestamp":"2026-01-21T18:39:08.236Z","toolCount":16,"tools":[{"category":"Meta","name":"request_missing_parameters"},{"category":"Email","name":"fetch_emails"},{"category":"Email","name":"send_email"},{"category":"Calendar","name":"fetch_calendar_events"},{"category":"Calendar","name":"create_calendar_event"},{"category":"Calendar","name":"update_calendar_event"},{"category":"Productivity","name":"fetch_notion_page"},{"category":"Productivity","name":"create_notion_page"},{"category":"Productivity","name":"update_notion_page"},{"category":"CRM","name":"fetch_entity"},{"category":"CRM","name":"create_entity"},{"category":"CRM","name":"update_entity"},{"category":"Email & Calendar","name":"create_outlook_entity"},{"category":"Email & Calendar","name":"update_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_event_body"}]}
+{"level":"info","message":"NangoService initialized with SessionAwareWarmupManager.","service":"NangoService","timestamp":"2026-01-21T18:39:08.238Z"}
+{"chunkSize":512,"level":"info","message":"StreamManager initialized","timestamp":"2026-01-21T18:39:08.239Z"}
+{"configStructure":["tools","beats","providers"],"level":"info","message":"ToolConfigManager: Loading tool configuration","path":"/Users/lutendolukhele/Desktop/backedn-main/config/tool-config.json","timestamp":"2026-01-21T18:39:08.242Z"}
+{"level":"info","message":"ToolConfigManager: Detected flat tools array structure","timestamp":"2026-01-21T18:39:08.243Z"}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Grouped tools by category","timestamp":"2026-01-21T18:39:08.243Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}]}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Validation on init","timestamp":"2026-01-21T18:39:08.243Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}],"totalCategories":6,"totalTools":16}
+{"level":"info","message":"✅ All critical tools validated successfully","timestamp":"2026-01-21T18:39:08.243Z","toolCount":16,"tools":[{"category":"Meta","name":"request_missing_parameters"},{"category":"Email","name":"fetch_emails"},{"category":"Email","name":"send_email"},{"category":"Calendar","name":"fetch_calendar_events"},{"category":"Calendar","name":"create_calendar_event"},{"category":"Calendar","name":"update_calendar_event"},{"category":"Productivity","name":"fetch_notion_page"},{"category":"Productivity","name":"create_notion_page"},{"category":"Productivity","name":"update_notion_page"},{"category":"CRM","name":"fetch_entity"},{"category":"CRM","name":"create_entity"},{"category":"CRM","name":"update_entity"},{"category":"Email & Calendar","name":"create_outlook_entity"},{"category":"Email & Calendar","name":"update_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_event_body"}]}
+{"level":"info","message":"ToolOrchestrator initialized with CRM entity caching and deduplication.","timestamp":"2026-01-21T18:39:08.245Z"}
+{"apiKeyLength":56,"apiKeyPrefix":"gsk_IaL9cP","apiKeyProvided":true,"apiKeyType":"string","level":"info","message":"PlannerService constructor called","timestamp":"2026-01-21T18:39:08.245Z"}
+{"apiKeyValid":true,"level":"info","maxTokens":4000,"message":"PlannerService initialized with Groq","model":"llama-3.3-70b-versatile","timestamp":"2026-01-21T18:39:08.245Z"}
+{"level":"info","message":"HistoryService initialized","timestamp":"2026-01-21T18:39:08.249Z"}
+{"configStructure":["tools","beats","providers"],"level":"info","message":"ToolConfigManager: Loading tool configuration","path":"/Users/lutendolukhele/Desktop/backedn-main/config/tool-config.json","timestamp":"2026-01-21T18:39:08.250Z"}
+{"level":"info","message":"ToolConfigManager: Detected flat tools array structure","timestamp":"2026-01-21T18:39:08.250Z"}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Grouped tools by category","timestamp":"2026-01-21T18:39:08.251Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}]}
+{"categories":["Meta","Email","Calendar","Productivity","CRM","Email & Calendar"],"level":"info","message":"ToolConfigManager: Validation on init","timestamp":"2026-01-21T18:39:08.251Z","toolsByCategory":[{"category":"Meta","count":1,"names":["request_missing_parameters"]},{"category":"Email","count":2,"names":["fetch_emails","send_email"]},{"category":"Calendar","count":3,"names":["fetch_calendar_events","create_calendar_event","update_calendar_event"]},{"category":"Productivity","count":3,"names":["fetch_notion_page","create_notion_page","update_notion_page"]},{"category":"CRM","count":3,"names":["fetch_entity","create_entity","update_entity"]},{"category":"Email & Calendar","count":4,"names":["create_outlook_entity","update_outlook_entity","fetch_outlook_entity","fetch_outlook_event_body"]}],"totalCategories":6,"totalTools":16}
+{"level":"info","message":"✅ All critical tools validated successfully","timestamp":"2026-01-21T18:39:08.251Z","toolCount":16,"tools":[{"category":"Meta","name":"request_missing_parameters"},{"category":"Email","name":"fetch_emails"},{"category":"Email","name":"send_email"},{"category":"Calendar","name":"fetch_calendar_events"},{"category":"Calendar","name":"create_calendar_event"},{"category":"Calendar","name":"update_calendar_event"},{"category":"Productivity","name":"fetch_notion_page"},{"category":"Productivity","name":"create_notion_page"},{"category":"Productivity","name":"update_notion_page"},{"category":"CRM","name":"fetch_entity"},{"category":"CRM","name":"create_entity"},{"category":"CRM","name":"update_entity"},{"category":"Email & Calendar","name":"create_outlook_entity"},{"category":"Email & Calendar","name":"update_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_entity"},{"category":"Email & Calendar","name":"fetch_outlook_event_body"}]}
+{"level":"info","message":"ActionLauncherService initialized.","timestamp":"2026-01-21T18:39:08.252Z"}
+node:events:496
+      throw er; // Unhandled 'error' event
+      ^
+
+Error: listen EADDRINUSE: address already in use :::8080
+    at Server.setupListenHandle [as _listen2] (node:net:1937:16)
+    at listenInCluster (node:net:1994:12)
+    at Server.listen (node:net:2099:7)
+    at Object.<anonymous> (/Users/lutendolukhele/Desktop/backedn-main/dist/index.js:1322:8)
+    at Module._compile (node:internal/modules/cjs/loader:1554:14)
+    at Object..js (node:internal/modules/cjs/loader:1706:10)
+    at Module.load (node:internal/modules/cjs/loader:1289:32)
+    at Function._load (node:internal/modules/cjs/loader:1108:12)
+    at TracingChannel.traceSync (node:diagnostics_channel:322:14)
+    at wrapModuleLoad (node:internal/modules/cjs/loader:220:24)
+    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:170:5)
+    at node:internal/main/run_main_module:36:49
+Emitted 'error' event on WebSocketServer instance at:
+    at Server.emit (node:events:518:28)
+    at emitErrorNT (node:net:1973:8)
+    at process.processTicksAndRejections (node:internal/process/task_queues:90:21) {
+  code: 'EADDRINUSE',
+  errno: -48,
+  syscall: 'listen',
+  address: '::',
+  port: 8080
+}
+
+Node.js v22.14.0

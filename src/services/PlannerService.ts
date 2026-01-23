@@ -430,12 +430,27 @@ public async generatePlan(
   if (this.providerAwareFilter && userId) {
     logger.info('PlannerService: Using provider-aware tool filtering', { userId });
     const filteredTools = await this.providerAwareFilter.getAvailableToolsForUser(userId);
-    availableTools = filteredTools.map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      category: tool.category,
-      parameters: tool.parameters
-    }));
+
+    if (filteredTools.length === 0) {
+      // Don't fall back to all tools - user has no connected providers
+      // Return a message telling them to connect integrations
+      logger.warn('PlannerService: User has no connected providers - cannot generate plan', { userId });
+      
+      // Emit a friendly error message instead of crashing with rate limit
+      const noProvidersError: StreamChunk = {
+        type: 'error',
+        content: 'It looks like you haven\'t connected any integrations yet. To help you with tasks like fetching emails, managing calendars, or working with Salesforce, please connect your accounts in the Integrations settings.'
+      };
+      this.emit('send_chunk', sessionId, noProvidersError);
+      return [];
+    } else {
+      availableTools = filteredTools.map(tool => ({
+        name: tool.name,
+        description: tool.description,
+        category: tool.category,
+        parameters: tool.parameters
+      }));
+    }
   } else {
     logger.warn('PlannerService: Provider-aware filtering not available, using all tools');
     availableTools = this.toolConfigManager.getToolDefinitionsForPlanner();

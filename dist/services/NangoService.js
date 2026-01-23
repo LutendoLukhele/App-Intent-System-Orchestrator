@@ -49,6 +49,7 @@ class NangoService {
                     break;
                 case 'salesforce':
                 case 'salesforce-2':
+                case 'salesforce-ybzg':
                     pingEndpoint = '/services/data/v60.0/sobjects';
                     break;
                 case 'outlook':
@@ -181,10 +182,27 @@ class NangoService {
         }
     }
     async sendEmail(providerConfigKey, connectionId, payload) {
-        const endpoint = 'https://api.nango.dev/v1/emails';
-        this.logger.info('Calling Nango custom email endpoint', { endpoint });
+        const actionName = 'send-email';
+        this.logger.info('🔥 sendEmail raw payload', {
+            payloadKeys: Object.keys(payload || {}),
+            hasInput: !!payload?.input,
+            inputKeys: payload?.input ? Object.keys(payload.input) : [],
+            rawPayload: JSON.stringify(payload).substring(0, 500)
+        });
+        const emailPayload = payload?.input || payload;
+        this.logger.info('Sending email via Nango action trigger', {
+            actionName,
+            to: emailPayload?.to,
+            subject: emailPayload?.subject,
+            hasTo: !!emailPayload?.to,
+            emailPayloadKeys: Object.keys(emailPayload || {})
+        });
         try {
-            const response = await axios_1.default.post(endpoint, payload, {
+            await this.warmConnection(providerConfigKey, connectionId);
+            const response = await axios_1.default.post('https://api.nango.dev/action/trigger', {
+                action_name: actionName,
+                input: emailPayload
+            }, {
                 headers: {
                     'Authorization': `Bearer ${config_1.CONFIG.NANGO_SECRET_KEY}`,
                     'Provider-Config-Key': providerConfigKey,
@@ -192,14 +210,17 @@ class NangoService {
                     'Content-Type': 'application/json'
                 }
             });
-            this.logger.info('Nango custom email endpoint call successful');
+            this.logger.info('Nango send email action successful', {
+                id: response.data?.id,
+                threadId: response.data?.threadId
+            });
             return response.data;
         }
         catch (error) {
-            this.logger.error('Nango custom email endpoint call failed', {
+            this.logger.error('Nango send email action failed', {
                 error: error.response?.data || error.message,
             });
-            throw new Error(error.response?.data?.message || `Request to custom endpoint failed with status ${error.response?.status}`);
+            throw new Error(error.response?.data?.message || `Send email failed with status ${error.response?.status}`);
         }
     }
     async fetchEmails(providerConfigKey, connectionId, input) {
@@ -282,6 +303,60 @@ class NangoService {
         catch (error) {
             this.logger.error('Failed to update calendar event', { error: error.message || error });
             throw error;
+        }
+    }
+    async fetchFromCache(provider, connectionId, model, options) {
+        try {
+            const params = { model };
+            if (options?.limit) {
+                params.limit = options.limit;
+            }
+            if (options?.modifiedAfter) {
+                params.modified_after = options.modifiedAfter;
+            }
+            if (options?.cursor) {
+                params.cursor = options.cursor;
+            }
+            this.logger.info('🔍 [NangoService.fetchFromCache] Request details', {
+                url: 'https://api.nango.dev/records',
+                provider,
+                connectionId: connectionId.substring(0, 12) + '...',
+                params,
+                headers: {
+                    'Provider-Config-Key': provider,
+                    'Connection-Id': connectionId.substring(0, 12) + '...'
+                }
+            });
+            const response = await axios_1.default.get('https://api.nango.dev/records', {
+                headers: {
+                    'Authorization': `Bearer ${config_1.CONFIG.NANGO_SECRET_KEY}`,
+                    'Provider-Config-Key': provider,
+                    'Connection-Id': connectionId,
+                },
+                params,
+            });
+            this.logger.info('🔍 [NangoService.fetchFromCache] Response details', {
+                statusCode: response.status,
+                recordCount: response.data.records?.length || 0,
+                hasNextCursor: !!response.data.next_cursor,
+                responseKeys: Object.keys(response.data),
+                firstRecordKeys: response.data.records?.[0] ? Object.keys(response.data.records[0]) : []
+            });
+            return {
+                records: response.data.records || [],
+                nextCursor: response.data.next_cursor,
+            };
+        }
+        catch (error) {
+            this.logger.error('fetchFromCache failed', {
+                provider,
+                connectionId,
+                model,
+                error: error.response?.data || error.message,
+                statusCode: error.response?.status,
+                fullError: JSON.stringify(error.response?.data).substring(0, 500)
+            });
+            throw new Error(`Failed to fetch from Nango cache: ${error.response?.data?.error || error.message}`);
         }
     }
     async triggerOutlookAction(providerConfigKey, connectionId, actionPayload) {
@@ -370,6 +445,28 @@ class NangoService {
             totalConnections: this.connectionWarmCache.size,
             cacheSize: this.connectionWarmCache.size
         };
+    }
+    async triggerSync(provider, connectionId, syncName) {
+        try {
+            await axios_1.default.post('https://api.nango.dev/sync/trigger', { syncs: [syncName] }, {
+                headers: {
+                    'Authorization': `Bearer ${config_1.CONFIG.NANGO_SECRET_KEY}`,
+                    'Provider-Config-Key': provider,
+                    'Connection-Id': connectionId,
+                    'Content-Type': 'application/json'
+                },
+            });
+            return { success: true };
+        }
+        catch (error) {
+            this.logger.error('triggerSync failed', {
+                provider,
+                connectionId,
+                syncName,
+                error: error.response?.data || error.message,
+            });
+            throw new Error(`Failed to trigger Nango sync: ${error.response?.data?.error || error.message}`);
+        }
     }
     getWarmupManager() {
         return this.warmupManager;

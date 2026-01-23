@@ -68,6 +68,7 @@ const DataDependencyService_1 = require("./services/data/DataDependencyService")
 const Resolver_1 = require("./services/data/Resolver");
 const session_service_1 = require("./services/session.service");
 const PlanExecutorService_1 = require("./services/PlanExecutorService");
+const ExecutionDecisionService_1 = require("./services/ExecutionDecisionService");
 const router_service_1 = require("./services/router.service");
 const prompt_generator_service_1 = require("./services/prompt-generator.service");
 const groq_service_1 = require("./services/groq.service");
@@ -100,8 +101,15 @@ const nangoService = new NangoService_1.NangoService();
 const streamManager = new StreamManager_1.StreamManager({ logger });
 const dataDependencyService = new DataDependencyService_1.DataDependencyService();
 const resolver = new Resolver_1.Resolver(dataDependencyService);
-const followUpService = new FollowUpService_1.FollowUpService(groqClient, config_1.CONFIG.MODEL_NAME, config_1.CONFIG.MAX_TOKENS);
-const toolOrchestrator = new ToolOrchestrator_1.ToolOrchestrator({ logger, nangoService, toolConfigManager, dataDependencyService, resolver, redisClient: redis });
+const followUpService = new FollowUpService_1.FollowUpService(groqClient, config_1.CONFIG.MODEL_NAME, config_1.CONFIG.MAX_TOKENS, redis);
+const toolOrchestrator = new ToolOrchestrator_1.ToolOrchestrator({
+    logger,
+    nangoService,
+    toolConfigManager,
+    dataDependencyService,
+    resolver,
+    redisClient: redis
+});
 const plannerService = new PlannerService_1.PlannerService(config_1.CONFIG.GROQ_API_KEY, config_1.CONFIG.MAX_TOKENS, toolConfigManager, providerAwareFilter);
 const beatEngine = new BeatEngine_1.BeatEngine(toolConfigManager);
 const historyService = new HistoryService_1.HistoryService(redis);
@@ -112,11 +120,48 @@ const conversationService = new ConversationService_1.ConversationService({
     TOOL_CONFIG_PATH: config_1.CONFIG.TOOL_CONFIG_PATH,
     nangoService: nangoService,
     logger: logger,
+    redisClient: redis,
     client: groqClient,
     tools: [],
 }, providerAwareFilter);
 const actionLauncherService = new action_launcher_service_1.ActionLauncherService(conversationService, toolConfigManager, beatEngine);
 const planExecutorService = new PlanExecutorService_1.PlanExecutorService(actionLauncherService, toolOrchestrator, streamManager, toolConfigManager, groqClient, plannerService, followUpService, historyService);
+const executionDecisionService = new ExecutionDecisionService_1.ExecutionDecisionService();
+const store_1 = require("./cortex/store");
+const compiler_1 = require("./cortex/compiler");
+const matcher_1 = require("./cortex/matcher");
+const runtime_1 = require("./cortex/runtime");
+const routes_1 = require("./cortex/routes");
+const tools_1 = require("./cortex/tools");
+const event_shaper_1 = require("./cortex/event-shaper");
+const cortexStore = new store_1.HybridStore(redis, sql);
+const cortexCompiler = new compiler_1.Compiler(config_1.CONFIG.GROQ_API_KEY);
+const cortexMatcher = new matcher_1.Matcher(cortexStore, config_1.CONFIG.GROQ_API_KEY);
+const toolExecutor = new tools_1.CortexToolExecutor(toolOrchestrator);
+const cortexRuntime = new runtime_1.Runtime(cortexStore, config_1.CONFIG.GROQ_API_KEY, toolExecutor, logger);
+async function processCortexEvent(event) {
+    try {
+        const written = await cortexStore.writeEvent(event);
+        if (!written)
+            return;
+        const runs = await cortexMatcher.match(event);
+        for (const run of runs) {
+            cortexRuntime.execute(run).catch(err => {
+                logger.error('Run execution failed', { run_id: run.id, error: err.message });
+            });
+        }
+        logger.info('Event processed', { event_id: event.id, source: event.source, event: event.event, runs: runs.length });
+    }
+    catch (err) {
+        logger.error('Event processing error', { error: err.message });
+    }
+}
+const eventShaper = new event_shaper_1.EventShaper(config_1.CONFIG.NANGO_SECRET_KEY, redis, sql, processCortexEvent);
+setInterval(() => {
+    cortexRuntime.resumeWaitingRuns().catch(err => {
+        logger.error('Resume waiting runs failed', { error: err.message });
+    });
+}, 60000);
 const sessionState = storage.create({ dir: 'sessions' });
 (async () => {
     await sessionState.init();
@@ -145,6 +190,150 @@ app.use('/api/interpret', interpret_1.default);
 app.use('/api/sessions', sessions_1.default);
 app.locals.historyService = historyService;
 app.use('/history', history_1.default);
+app.use('/api/cortex', (0, routes_1.createCortexRouter)(cortexStore, cortexCompiler, cortexRuntime));
+const CONNECTION_OWNER_TTL_SECONDS = 60 * 60;
+const getConnectionOwnerCacheKey = (connectionId) => `connection-owner:${connectionId}`;
+const getDefaultEmailProviderKey = () => toolConfigManager.getToolDefinition('fetch_emails')?.providerConfigKey || 'google-mail-ynxw';
+async function registerConnectionForUser(userId, providerKey, connectionId) {
+    const normalizedProvider = providerKey?.trim();
+    const finalProviderKey = normalizedProvider || getDefaultEmailProviderKey();
+    const providerExists = toolConfigManager.getAllTools()
+        .map(tool => tool.providerConfigKey)
+        .filter(Boolean)
+        .includes(finalProviderKey);
+    await sql `
+        INSERT INTO connections (user_id, provider, connection_id)
+        VALUES (${userId}, ${finalProviderKey}, ${connectionId})
+        ON CONFLICT (user_id, provider) DO UPDATE SET
+            connection_id = EXCLUDED.connection_id,
+            enabled = true,
+            error_count = 0,
+            last_poll_at = NOW()
+    `;
+    await redis.setex(getConnectionOwnerCacheKey(connectionId), CONNECTION_OWNER_TTL_SECONDS, userId);
+    return { providerKey: finalProviderKey, providerExists };
+}
+app.post('/api/connections', async (req, res) => {
+    try {
+        const userId = req.headers['x-user-id'];
+        const { provider, connectionId } = req.body;
+        if (!userId || !connectionId) {
+            return res.status(400).json({ error: 'Missing required fields: userId and connectionId' });
+        }
+        const { providerKey, providerExists } = await registerConnectionForUser(userId, provider, connectionId);
+        if (!providerExists) {
+            logger.warn('Provider key not found in tool config', {
+                provider: providerKey,
+                connectionId: '***',
+                userId,
+                availableProviders: toolConfigManager.getAllTools()
+                    .map(t => t.providerConfigKey)
+                    .filter(Boolean)
+            });
+        }
+        logger.info('Connection registered', {
+            userId,
+            provider: providerKey,
+            connectionId: '***',
+            providerValid: providerExists
+        });
+        res.json({ success: true });
+    }
+    catch (err) {
+        logger.error('Connection registration failed', { error: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
+app.get('/api/connections', async (req, res) => {
+    try {
+        const userId = req.headers['x-user-id'];
+        if (!userId)
+            return res.status(401).json({ error: 'Unauthorized' });
+        const connections = await sql `
+      SELECT id, provider, connection_id, enabled, last_poll_at, error_count, created_at
+      FROM connections
+      WHERE user_id = ${userId}
+    `;
+        res.json({ connections });
+    }
+    catch (err) {
+        logger.error('Failed to fetch connections', { error: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/webhooks/nango', async (req, res) => {
+    try {
+        const payload = req.body;
+        logger.info('Nango webhook received (202 Accepted - async processing)', {
+            type: payload.type,
+            connectionId: payload.connectionId,
+            model: payload.model,
+            syncName: payload.syncName,
+            hasResponseResults: !!payload.responseResults,
+            responseResultsKeys: payload.responseResults ? Object.keys(payload.responseResults) : [],
+            addedCount: payload.responseResults?.added?.length || 0,
+            updatedCount: payload.responseResults?.updated?.length || 0,
+            deletedCount: payload.responseResults?.deleted?.length || 0,
+        });
+        res.status(202).json({
+            status: 'accepted',
+            message: 'Webhook received and queued for processing'
+        });
+        if (payload.type === 'sync') {
+            eventShaper.handleWebhook(payload)
+                .then(result => {
+                logger.info('Webhook processed successfully (async)', {
+                    events_generated: result.processed,
+                    connectionId: payload.connectionId,
+                    model: payload.model
+                });
+            })
+                .catch(err => {
+                logger.error('Webhook processing failed (async)', {
+                    error: err.message,
+                    stack: err.stack,
+                    connectionId: payload.connectionId,
+                    model: payload.model,
+                    type: err.constructor.name
+                });
+            });
+        }
+        else {
+            logger.warn('Received non-sync webhook type', { type: payload.type });
+        }
+    }
+    catch (err) {
+        logger.error('Nango webhook error', { error: err.message, stack: err.stack });
+        res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/debug/force-sync', async (req, res) => {
+    try {
+        const { provider, connectionId, syncName } = req.body;
+        if (!provider || !connectionId || !syncName) {
+            return res.status(400).json({
+                error: 'Missing required fields: provider, connectionId, syncName',
+            });
+        }
+        if (connectionId.startsWith('test-connection')) {
+            logger.info('Skipping Nango API call for test connection', { connectionId });
+            return res.json({
+                success: true,
+                message: `Test sync "${syncName}" acknowledged (no actual sync triggered).`,
+            });
+        }
+        logger.info('Manually triggering sync', { provider, connectionId, syncName });
+        await nangoService.triggerSync(provider, connectionId, syncName);
+        res.json({
+            success: true,
+            message: `Sync "${syncName}" triggered successfully. Check webhook endpoint for results.`,
+        });
+    }
+    catch (err) {
+        logger.error('Force sync failed', { error: err.message });
+        res.status(500).json({ error: err.message });
+    }
+});
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -154,6 +343,9 @@ actionLauncherService.on('send_chunk', (sessionId, chunk) => {
     streamManager.sendChunk(sessionId, chunk);
 });
 plannerService.on('send_chunk', (sessionId, chunk) => {
+    streamManager.sendChunk(sessionId, chunk);
+});
+conversationService.on('send_chunk', (sessionId, chunk) => {
     streamManager.sendChunk(sessionId, chunk);
 });
 async function notifyUserOfToolChanges(userId) {
@@ -213,8 +405,14 @@ wss.on('connection', (ws, req) => {
                     try {
                         const activeConnectionId = await redis.get(`active-connection:${userId}`);
                         if (activeConnectionId) {
-                            logger.info('Warming connection post-auth', { userId, connectionId: '***' });
-                            await nangoService.warmConnection('gmail', activeConnectionId);
+                            const emailTool = toolConfigManager.getToolDefinition('fetch_emails');
+                            const gmailProviderKey = emailTool?.providerConfigKey || 'google-mail-ynxw';
+                            logger.info('Warming Gmail connection post-auth', {
+                                userId,
+                                connectionId: '***',
+                                providerKey: gmailProviderKey
+                            });
+                            await nangoService.warmConnection(gmailProviderKey, activeConnectionId);
                         }
                     }
                     catch (warmError) {
@@ -271,21 +469,91 @@ wss.on('connection', (ws, req) => {
                 const completedRun = await planExecutorService.executePlan(currentRun, userId);
                 state.activeRun = completedRun;
                 await sessionState.setItem(sessionId, state);
+                if (completedRun.status === 'completed' && !completedRun.assistantResponse) {
+                    logger.info('Execute action: Plan completed, generating final summary', {
+                        sessionId,
+                        runId: completedRun.id,
+                        planLength: completedRun.toolExecutionPlan.length
+                    });
+                    completedRun.toolExecutionPlan.forEach(step => {
+                        if (step.result) {
+                            logger.info('Adding tool result to history', {
+                                stepId: step.stepId,
+                                toolName: step.toolCall.name,
+                                status: step.status
+                            });
+                            const resultData = step.status === 'failed'
+                                ? {
+                                    status: 'failed',
+                                    error: step.result.error || 'Unknown error',
+                                    errorDetails: step.result.errorDetails,
+                                    ...step.result.data
+                                }
+                                : step.result.data;
+                            conversationService.addToolResultMessageToHistory(sessionId, step.toolCall.id, step.toolCall.name, resultData);
+                        }
+                    });
+                    logger.info('Requesting final summary from LLM', { sessionId });
+                    const finalResponseResult = await conversationService.processMessageAndAggregateResults(null, sessionId, (0, uuid_1.v4)(), userId);
+                    logger.info('Final response result received', {
+                        sessionId,
+                        hasResponse: !!finalResponseResult.conversationalResponse,
+                        responseLength: finalResponseResult.conversationalResponse?.length || 0
+                    });
+                    if (finalResponseResult.conversationalResponse?.trim()) {
+                        await streamText(sessionId, (0, uuid_1.v4)(), finalResponseResult.conversationalResponse);
+                        try {
+                            await historyService.recordAssistantMessage(userId, sessionId, finalResponseResult.conversationalResponse);
+                            logger.info('Final response recorded in history', { sessionId });
+                        }
+                        catch (error) {
+                            logger.warn('Failed to record assistant message', { error: error.message });
+                        }
+                        completedRun.assistantResponse = finalResponseResult.conversationalResponse;
+                        state.activeRun = completedRun;
+                        await sessionState.setItem(sessionId, state);
+                    }
+                }
             }
             if (data.type === 'update_parameter' && data.content) {
                 actionLauncherService.updateParameterValue(sessionId, data.content);
                 return;
             }
             if (data.type === 'update_active_connection' && data.content) {
-                const { connectionId } = data.content;
+                const { connectionId, provider, providerConfigKey } = data.content;
                 if (!userId || !connectionId)
                     return;
                 await redis.set(`active-connection:${userId}`, connectionId);
-                logger.info(`Successfully set active Nango connection for user`, { userId });
+                logger.info('Successfully set active Nango connection for user', { userId });
                 await userToolCacheService.invalidateUserToolCache(userId);
                 const availableTools = await providerAwareFilter.getAvailableToolsForUser(userId);
+                let providerKeyToWarm = provider ?? providerConfigKey;
                 try {
-                    const warmSuccess = await nangoService.warmConnection('gmail', connectionId);
+                    const registration = await registerConnectionForUser(userId, providerKeyToWarm, connectionId);
+                    providerKeyToWarm = registration.providerKey;
+                    if (!registration.providerExists) {
+                        logger.warn('Active connection uses unknown provider key', {
+                            userId,
+                            provider: providerKeyToWarm,
+                            connectionId: '***'
+                        });
+                    }
+                }
+                catch (registrationError) {
+                    providerKeyToWarm = getDefaultEmailProviderKey();
+                    logger.error('Failed to persist active connection', {
+                        userId,
+                        connectionId: '***',
+                        error: registrationError.message
+                    });
+                }
+                try {
+                    logger.info('Warming active connection', {
+                        userId,
+                        connectionId: '***',
+                        providerKey: providerKeyToWarm
+                    });
+                    const warmSuccess = await nangoService.warmConnection(providerKeyToWarm, connectionId);
                     streamManager.sendChunk(sessionId, {
                         type: 'tools_updated',
                         content: {
@@ -301,7 +569,12 @@ wss.on('connection', (ws, req) => {
                     await notifyUserOfToolChanges(userId);
                 }
                 catch (error) {
-                    logger.error('Connection warming on update failed', { userId, connectionId: '***', error: error.message });
+                    logger.error('Connection warming on update failed', {
+                        userId,
+                        connectionId: '***',
+                        providerKey: providerKeyToWarm,
+                        error: error.message
+                    });
                     streamManager.sendChunk(sessionId, {
                         type: 'tools_updated',
                         content: {
@@ -404,9 +677,23 @@ wss.on('connection', (ws, req) => {
                 }));
                 await sessionState.setItem(sessionId, state);
                 const actions = actionLauncherService.getActiveActions(sessionId);
-                const needsUserInput = actions.some(a => a.status === 'collecting_parameters');
-                if (!needsUserInput && actions.length > 0) {
-                    logger.info('No user input needed for rerun, starting auto-execution.', { sessionId, runId: run.id });
+                const planAnalysis = executionDecisionService.analyzePlan(actions.map(a => ({
+                    name: a.toolName,
+                    status: a.status,
+                    arguments: a.arguments || a.parameters
+                })));
+                const decision = executionDecisionService.shouldAutoExecute(planAnalysis);
+                logger.info('Rerun execution decision', {
+                    sessionId,
+                    decision,
+                    actionCount: actions.length
+                });
+                if (decision.shouldAutoExecute) {
+                    logger.info('Auto-executing rerun plan', {
+                        sessionId,
+                        runId: run.id,
+                        reason: decision.reason
+                    });
                     await planExecutorService.executePlan(run, userId);
                     if (run.status === 'completed') {
                         logger.info('Rerun plan auto-execution complete, generating final response.', { sessionId });
@@ -466,9 +753,23 @@ wss.on('connection', (ws, req) => {
                             logger.warn('Failed to record plan in history', { error: error.message });
                         }
                         const actions = actionLauncherService.getActiveActions(sessionId);
-                        const needsUserInput = actions.some(a => a.status === 'collecting_parameters');
-                        if (!needsUserInput && actions.length > 0) {
-                            logger.info('No user input needed for plan, starting auto-execution.', { sessionId, runId: run.id });
+                        const planAnalysis = executionDecisionService.analyzePlan(actions.map(a => ({
+                            name: a.toolName,
+                            status: a.status,
+                            arguments: a.arguments || a.parameters
+                        })));
+                        const decision = executionDecisionService.shouldAutoExecute(planAnalysis);
+                        logger.info('Multi-step plan execution decision', {
+                            sessionId,
+                            decision,
+                            actionCount: actions.length
+                        });
+                        if (decision.shouldAutoExecute) {
+                            logger.info('Auto-executing multi-step plan', {
+                                sessionId,
+                                runId: run.id,
+                                reason: decision.reason
+                            });
                             const completedRun = await planExecutorService.executePlan(run, userId);
                             state.activeRun = completedRun;
                             await sessionState.setItem(sessionId, state);
@@ -544,7 +845,17 @@ wss.on('connection', (ws, req) => {
                     await sessionState.setItem(sessionId, state);
                     await actionLauncherService.processActionPlan(singleStepPlan, sessionId, userId, messageId, toolOrchestrator, run);
                     const actions = actionLauncherService.getActiveActions(sessionId);
-                    const needsUserInput = actions.some(a => a.status === 'collecting_parameters');
+                    const planAnalysis = executionDecisionService.analyzePlan(actions.map(a => ({
+                        name: a.toolName,
+                        status: a.status,
+                        arguments: a.arguments || a.parameters
+                    })));
+                    const decision = executionDecisionService.shouldAutoExecute(planAnalysis);
+                    logger.info('Single-step plan execution decision', {
+                        sessionId,
+                        decision,
+                        actionCount: actions.length
+                    });
                     const enrichedPlan = singleStepPlan.map((step) => {
                         const toolDef = toolConfigManager.getToolDefinition(step.tool);
                         const toolDisplayName = toolDef?.display_name || toolDef?.name || step.tool;
@@ -578,14 +889,35 @@ wss.on('connection', (ws, req) => {
                         content: { messageId, planOverview: enrichedPlan, analysis: `Preparing to execute action.` },
                         messageId, isFinal: true,
                     });
-                    if (!needsUserInput && actions.length > 0) {
-                        logger.info('No user input needed for single action, starting auto-execution.', { sessionId, runId: run.id });
+                    if (decision.shouldAutoExecute) {
+                        logger.info('Auto-executing single action', {
+                            sessionId,
+                            runId: run.id,
+                            reason: decision.reason
+                        });
                         const completedRunAfterExec = await planExecutorService.executePlan(run, userId);
                         state.activeRun = completedRunAfterExec;
                         await sessionState.setItem(sessionId, state);
                     }
-                    else if (actions.length > 0) {
-                        logger.info('Single action requires user input before execution.', { sessionId });
+                    else if (decision.needsUserInput) {
+                        logger.info('Single action requires user input before execution', {
+                            sessionId,
+                            reason: decision.reason
+                        });
+                    }
+                    else if (decision.needsConfirmation) {
+                        logger.info('Single action requires user confirmation', {
+                            sessionId,
+                            reason: decision.reason
+                        });
+                        streamManager.sendChunk(sessionId, {
+                            type: 'action_confirmation_required',
+                            plan_id: run.id,
+                            actions: enrichedPlan,
+                            message: decision.reason,
+                            showExecuteButton: true,
+                            autoExecute: false
+                        });
                     }
                 }
                 const finalRunState = (await sessionState.getItem(sessionId))?.activeRun;
@@ -988,3 +1320,17 @@ wss.on('connection', (ws, req) => {
 });
 const PORT = process.env.PORT || 8080;
 server.listen(PORT, () => console.log(`🚀 Server is listening on port ${PORT}`));
+process.on('SIGTERM', () => {
+    logger.info('SIGTERM signal received: closing HTTP server');
+    server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+    });
+});
+process.on('SIGINT', () => {
+    logger.info('SIGINT signal received: closing HTTP server');
+    server.close(() => {
+        logger.info('HTTP server closed');
+        process.exit(0);
+    });
+});

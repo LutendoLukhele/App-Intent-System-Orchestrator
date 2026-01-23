@@ -1,6 +1,7 @@
 import { ChatCompletionMessageToolCall, ChatCompletionTool } from 'groq-sdk/resources/chat/completions';
 import { ServiceConfig } from '../base/types';
 import { Logger } from 'winston';
+import Redis from 'ioredis';
 
 // Response chunk type for WebSocket communication
 export type ResponseChunk = {
@@ -88,6 +89,7 @@ export interface ConversationConfig extends ServiceConfig {
   nangoService: import("../NangoService").NangoService;
   client: any;
   tools: any[];
+  redisClient?: Redis;
   groqApiKey: string;
   model: string;
   maxTokens: number;

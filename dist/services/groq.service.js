@@ -53,12 +53,47 @@ class GroqService {
                 stream: true,
                 ...(options.searchSettings ? { search_settings: options.searchSettings } : {}),
             });
+            let combinedContent = '';
+            let combinedReasoning = '';
+            let model = '';
+            let usage = { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 };
             for await (const chunk of stream) {
+                if (chunk.model)
+                    model = chunk.model;
+                if (chunk.usage) {
+                    usage = { ...usage, ...chunk.usage };
+                }
+                const choice = chunk.choices?.[0];
+                const delta = choice?.delta;
+                if (delta?.content && options.callbacks?.onToken) {
+                    options.callbacks.onToken(delta.content);
+                    combinedContent += delta.content;
+                }
+                if (delta?.reasoning && options.callbacks?.onReasoning) {
+                    options.callbacks.onReasoning(delta.reasoning);
+                    combinedReasoning += delta.reasoning;
+                }
+                if (delta?.tool_calls && options.callbacks?.onToolCall) {
+                    options.callbacks.onToolCall(delta.tool_calls);
+                }
                 yield chunk;
+            }
+            if (options.callbacks?.onComplete) {
+                options.callbacks.onComplete({
+                    content: combinedContent,
+                    model,
+                    usage,
+                    reasoning: combinedReasoning || undefined,
+                    executedTools: undefined
+                });
             }
         }
         catch (error) {
-            throw new Error(`Groq API error: ${error?.message ?? 'Unknown error'}`);
+            const err = new Error(`Groq API error: ${error?.message ?? 'Unknown error'}`);
+            if (options.callbacks?.onError) {
+                options.callbacks.onError(err);
+            }
+            throw err;
         }
     }
 }

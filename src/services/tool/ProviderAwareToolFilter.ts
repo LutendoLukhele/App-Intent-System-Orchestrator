@@ -1,6 +1,7 @@
 import { ToolConfig, ToolConfigManager } from './ToolConfigManager';
 import { NeonQueryFunction } from '@neondatabase/serverless';
 import { UserToolCacheService } from './UserToolCacheService';
+import { getCanonicalProviderChain } from './providerAliases';
 
 /**
  * Service for filtering tools based on user's actual provider configurations
@@ -39,27 +40,25 @@ export class ProviderAwareToolFilter {
       // Query database for user's active providers
       const userProviders = await this.sql`
         SELECT DISTINCT provider
-        FROM user_connections
+        FROM connections
         WHERE user_id = ${userId}
       `;
 
-      // Create a set of active provider keys for O(1) lookup
-      const activeProviders = new Set<string>(
-        userProviders.map(row => row.provider as string)
-      );
+      const activeProviders = new Set<string>();
+      userProviders.forEach(row => {
+        const providerKey = row.provider as string;
+        getCanonicalProviderChain(providerKey).forEach(key => activeProviders.add(key));
+      });
 
       // Get all tools from ToolConfigManager
       const allTools = this.toolConfigManager.getAllTools();
 
       // Filter to only tools whose providers are active
       const availableTools = allTools.filter(tool => {
-        // Skip tools without a provider configuration key
-        if (!tool.providerConfigKey) {
-          return false;
-        }
+        if (!tool.providerConfigKey) return false;
 
-        // Only include if user has this provider configured
-        return activeProviders.has(tool.providerConfigKey);
+        const normalizedToolKey = tool.providerConfigKey.trim().toLowerCase();
+        return activeProviders.has(normalizedToolKey);
       });
 
       console.log(`[ProviderAwareToolFilter] User ${userId} has ${activeProviders.size} active providers`);
@@ -114,11 +113,17 @@ export class ProviderAwareToolFilter {
     try {
       const userProviders = await this.sql`
         SELECT DISTINCT provider
-        FROM user_connections
+        FROM connections
         WHERE user_id = ${userId}
       `;
 
-      return new Set<string>(userProviders.map(row => row.provider as string));
+      const providers = new Set<string>();
+      userProviders.forEach(row => {
+        const providerKey = row.provider as string;
+        getCanonicalProviderChain(providerKey).forEach(key => providers.add(key));
+      });
+
+      return providers;
     } catch (error) {
       console.error('[ProviderAwareToolFilter] Error getting active providers:', error);
       return new Set();
@@ -153,13 +158,15 @@ export class ProviderAwareToolFilter {
       }
 
       // Map provider keys to friendly names and capabilities
-      const providerDescriptions: Record<string, string> = {
-        'google-mail': '✓ Gmail - Email operations (fetch, send)',
-        'google-calendar': '✓ Google Calendar - Calendar events (fetch, create, update)',
-        'outlook': '✓ Microsoft Outlook - Email, calendar events, and contacts',
-        'salesforce-2': '✓ Salesforce - CRM operations (accounts, contacts, leads, deals, cases)',
-        'notion': '✓ Notion - Page and database operations',
-      };
+        const SALESFORCE_ALIASES = ['salesforce-ybzg', 'salesforce-2', 'salesforce'];
+        const providerDescriptions: Record<string, string> = {
+          'google-mail': '✓ Gmail - Email operations (fetch, send)',
+          'google-mail-ynxw': '✓ Gmail - Email operations (fetch, send)',
+          'google-calendar': '✓ Google Calendar - Calendar events (fetch, create, update)',
+          'outlook': '✓ Microsoft Outlook - Email, calendar events, and contacts',
+          'salesforce-ybzg': '✓ Salesforce - CRM operations (accounts, contacts, leads, deals, cases)',
+          'notion': '✓ Notion - Page and database operations',
+        };
 
       const descriptions: string[] = [];
       const providerArray = Array.from(activeProviders).sort();
@@ -189,7 +196,7 @@ export class ProviderAwareToolFilter {
       }
 
       // Email-specific guidance
-      const hasGmail = activeProviders.has('google-mail');
+      const hasGmail = activeProviders.has('google-mail') || activeProviders.has('google-mail-ynxw');
       if (hasGmail && hasOutlook) {
         guidance += '- For EMAIL operations: User has both Gmail and Outlook. Ask which one to use, or default to Gmail.\n';
       } else if (hasGmail) {
@@ -198,9 +205,9 @@ export class ProviderAwareToolFilter {
         guidance += '- For EMAIL operations: Use Outlook tools only (create_outlook_entity, fetch_outlook_entity with entityType="Message").\n';
       }
 
-      // CRM guidance
-      if (activeProviders.has('salesforce-2')) {
-        guidance += '- For CRM operations: Use Salesforce tools (fetch_entity, create_entity, update_entity).\n';
+        const hasSalesforce = SALESFORCE_ALIASES.some(alias => activeProviders.has(alias));
+        if (hasSalesforce) {
+          guidance += '- For CRM operations: Use Salesforce tools (fetch_entity, create_entity, update_entity).\n';
       }
 
       // Notion guidance

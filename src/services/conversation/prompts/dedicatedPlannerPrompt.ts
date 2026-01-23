@@ -57,12 +57,18 @@ You MUST output a single JSON object with a key named "plan". The value must be 
 Each action object in the "plan" array must strictly follow this format:
 {
   "id": "string",
-  "intent": "string",
+  "intent": "string",  // Brief, user-friendly description of what this step does
   "tool": "string",  // MUST be an exact match from Available Tools
   "arguments": { /* JSON object of arguments - use placeholders for missing params */ },
   "status": "ready",
   "requiredParams": []
 }
+
+Important for Intent Field:
+- Write intent descriptions that will be displayed to the user
+- Keep them concise but clear (5-15 words typically)
+- Use natural language (e.g., "Fetch recent emails from Sarah" not "fetch_emails operation")
+- These help the user understand the step before confirmation
 
 Example Output with Placeholders (PREFERRED when info is missing):
 {
@@ -76,6 +82,18 @@ Example Output with Placeholders (PREFERRED when info is missing):
         "startTime": "{{PLACEHOLDER_start_time}}",
         "duration": "{{PLACEHOLDER_duration_minutes}}",
         "attendees": ["{{PLACEHOLDER_attendee_email}}"]
+      },
+      "status": "ready",
+      "requiredParams": []
+    },
+    {
+      "id": "action_2",
+      "intent": "Send confirmation email to all attendees",
+      "tool": "send_email",
+      "arguments": {
+        "to": "{{action_1.result.attendeeEmails}}",
+        "subject": "Meeting Scheduled: {{PLACEHOLDER_meeting_title}}",
+        "body": "Calendar meeting has been created. Please accept the invitation."
       },
       "status": "ready",
       "requiredParams": []

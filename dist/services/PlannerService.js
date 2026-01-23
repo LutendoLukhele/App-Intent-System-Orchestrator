@@ -315,12 +315,23 @@ Be specific about what's being done. Example: "Okay, sending an email to John Do
         if (this.providerAwareFilter && userId) {
             logger.info('PlannerService: Using provider-aware tool filtering', { userId });
             const filteredTools = await this.providerAwareFilter.getAvailableToolsForUser(userId);
-            availableTools = filteredTools.map(tool => ({
-                name: tool.name,
-                description: tool.description,
-                category: tool.category,
-                parameters: tool.parameters
-            }));
+            if (filteredTools.length === 0) {
+                logger.warn('PlannerService: User has no connected providers - cannot generate plan', { userId });
+                const noProvidersError = {
+                    type: 'error',
+                    content: 'It looks like you haven\'t connected any integrations yet. To help you with tasks like fetching emails, managing calendars, or working with Salesforce, please connect your accounts in the Integrations settings.'
+                };
+                this.emit('send_chunk', sessionId, noProvidersError);
+                return [];
+            }
+            else {
+                availableTools = filteredTools.map(tool => ({
+                    name: tool.name,
+                    description: tool.description,
+                    category: tool.category,
+                    parameters: tool.parameters
+                }));
+            }
         }
         else {
             logger.warn('PlannerService: Provider-aware filtering not available, using all tools');

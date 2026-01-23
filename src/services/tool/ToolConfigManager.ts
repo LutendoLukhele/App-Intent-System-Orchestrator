@@ -35,6 +35,8 @@ export interface ToolConfig {
   display_name?: string;
   providerConfigKey?: string;
   parameters?: ToolInputSchema;
+  source?: 'cache' | 'action';
+  cache_model?: string;
 }
 
 export class ToolConfigManager {
@@ -80,7 +82,9 @@ export class ToolConfigManager {
             category: category,
             display_name: tool.display_name || tool.name,
             providerConfigKey: tool.providerConfigKey,
-            parameters: tool.parameters
+            parameters: tool.parameters,
+            source: tool.source,
+            cache_model: tool.cache_model
           });
         });
 
@@ -247,6 +251,13 @@ export class ToolConfigManager {
   }
 
   /**
+   * Get tool config (alias for getToolDefinition for backwards compatibility)
+   */
+  public getToolConfig(toolName: string): ToolConfig | undefined {
+    return this.getToolDefinition(toolName);
+  }
+
+  /**
    * Get tool display name
    */
   public getToolDisplayName(toolName: string): string | null {
@@ -338,5 +349,83 @@ export class ToolConfigManager {
     }
 
     return conditionallyMissing;
+  }
+
+  /**
+   * Clean up tool schema for Groq API validation
+   * - Removes "optional" flags (not part of JSON Schema standard)
+   * - Removes non-required fields from properties that won't be populated
+   * - Ensures strict JSON Schema compliance
+   */
+  public cleanSchemaForGroq(schema: ToolInputSchema): any {
+    if (!schema || !schema.properties) return schema;
+
+    const cleaned = JSON.parse(JSON.stringify(schema)); // Deep clone
+
+    const cleanProperty = (prop: any): any => {
+      if (!prop || typeof prop !== 'object') return prop;
+
+      // Remove non-standard "optional" flag
+      if ('optional' in prop) {
+        delete prop.optional;
+      }
+
+      // Recursively clean nested properties
+      if (prop.properties && typeof prop.properties === 'object') {
+        for (const key in prop.properties) {
+          prop.properties[key] = cleanProperty(prop.properties[key]);
+        }
+      }
+
+      // Clean items in arrays
+      if (prop.items && typeof prop.items === 'object') {
+        prop.items = cleanProperty(prop.items);
+      }
+
+      return prop;
+    };
+
+    // Clean all top-level properties
+    if (cleaned.properties && typeof cleaned.properties === 'object') {
+      for (const key in cleaned.properties) {
+        cleaned.properties[key] = cleanProperty(cleaned.properties[key]);
+      }
+    }
+
+    return cleaned;
+  }
+
+  /**
+   * Get provider config key for a given provider type
+   * Handles mapping between generic names (gmail, google-calendar, etc.) and actual Nango config keys
+   *
+   * @param type - Generic provider type
+   * @returns Provider config key from tool-config.json or undefined if not found
+   */
+  public getProviderConfigKeyByType(type: 'gmail' | 'google-calendar' | 'salesforce' | 'outlook' | 'notion'): string | undefined {
+    const typeToToolMap: Record<string, string> = {
+      'gmail': 'fetch_emails',
+      'google-calendar': 'fetch_calendar_events',
+      'salesforce': 'fetch_entity',
+      'outlook': 'fetch_outlook_entity',
+      'notion': 'fetch_notion_page',
+    };
+
+    const toolName = typeToToolMap[type];
+    if (!toolName) {
+      logger.warn('Unknown provider type requested', { type });
+      return undefined;
+    }
+
+    const tool = this.getToolDefinition(toolName);
+    const providerKey = tool?.providerConfigKey;
+
+    logger.info('Resolved provider config key by type', {
+      type,
+      toolName,
+      providerKey
+    });
+
+    return providerKey;
   }
 }

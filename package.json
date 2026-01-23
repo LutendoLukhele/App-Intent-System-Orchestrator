@@ -9,7 +9,19 @@
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
     "watch": "tsc -w",
-    "interpret": "ts-node src/scripts/interpret.ts --"
+    "interpret": "ts-node src/scripts/interpret.ts --",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:cortex": "jest tests/cortex --verbose",
+    "test:cortex:infra": "jest tests/cortex/1-infrastructure.test.ts --verbose",
+    "test:cortex:cache": "jest tests/cortex/2-cache.test.ts --verbose --testTimeout=30000",
+    "test:cortex:routing": "jest tests/cortex/3-routing.test.ts --verbose --testTimeout=30000",
+    "test:cortex:webhooks": "jest tests/cortex/4-webhooks.test.ts --verbose --testTimeout=30000",
+    "test:cortex:e2e": "jest tests/cortex/5-e2e.test.ts --verbose --testTimeout=60000",
+    "test:cortex:performance": "jest tests/cortex/6-performance.test.ts --verbose --testTimeout=120000",
+    "test:cortex:watch": "jest tests/cortex --watch",
+    "debug:nango": "npx ts-node scripts/debug-nango-connection.ts"
   },
   "keywords": [],
   "author": "",
@@ -45,6 +57,7 @@
   },
   "devDependencies": {
     "@types/cors": "^2.8.19",
+    "@types/jest": "^29.5.12",
     "@types/marked": "^5.0.2",
     "@types/multer": "^2.0.0",
     "@types/node": "^22.14.1",
@@ -53,7 +66,9 @@
     "@types/ws": "^8.18.1",
     "@types/xlsx": "^0.0.35",
     "eslint": "^8.57.1",
+    "jest": "^29.7.0",
     "nodemon": "^3.1.9",
+    "ts-jest": "^29.1.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.3"
   }
