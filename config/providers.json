@@ -1,0 +1,212 @@
+{
+  "$schema": "./providers.schema.json",
+  "version": "1.0.0",
+  "description": "ASO Provider Configuration - Defines external provider integrations",
+  
+  "providers": {
+    "gmail": {
+      "key": "gmail",
+      "displayName": "Gmail",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "google-mail-ynxw",
+      "pingEndpoint": "/gmail/v1/users/me/profile",
+      "models": [
+        "GmailThread",
+        "GmailMessage"
+      ],
+      "actions": [
+        "send-email",
+        "reply-email",
+        "forward-email",
+        "archive-email",
+        "mark-as-read"
+      ],
+      "scopes": [
+        "https://www.googleapis.com/auth/gmail.readonly",
+        "https://www.googleapis.com/auth/gmail.send",
+        "https://www.googleapis.com/auth/gmail.modify"
+      ],
+      "rateLimits": {
+        "requestsPerMinute": 250,
+        "requestsPerDay": 10000
+      },
+      "aliases": ["google-mail", "google-mail-ynxw"]
+    },
+    
+    "google-calendar": {
+      "key": "google-calendar",
+      "displayName": "Google Calendar",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "google-calendar",
+      "pingEndpoint": "/calendar/v3/users/me/calendarList",
+      "models": [
+        "GoogleCalendarEvent",
+        "GoogleCalendarList"
+      ],
+      "actions": [
+        "create-event",
+        "update-event",
+        "delete-event",
+        "rsvp-event"
+      ],
+      "scopes": [
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events"
+      ],
+      "rateLimits": {
+        "requestsPerMinute": 180,
+        "requestsPerDay": 10000
+      },
+      "aliases": ["gcal", "calendar"]
+    },
+    
+    "salesforce": {
+      "key": "salesforce",
+      "displayName": "Salesforce",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "salesforce-ybzg",
+      "pingEndpoint": "/services/data/v60.0/sobjects",
+      "models": [
+        "SalesforceLead",
+        "SalesforceOpportunity",
+        "SalesforceAccount",
+        "SalesforceContact",
+        "SalesforceCase"
+      ],
+      "actions": [
+        "create-lead",
+        "update-lead",
+        "convert-lead",
+        "create-opportunity",
+        "update-opportunity",
+        "create-contact",
+        "update-contact",
+        "create-case",
+        "update-case"
+      ],
+      "scopes": [
+        "api",
+        "refresh_token"
+      ],
+      "rateLimits": {
+        "requestsPerMinute": 100,
+        "requestsPerDay": 15000
+      },
+      "aliases": ["salesforce-2", "salesforce-ybzg", "sfdc"]
+    },
+    
+    "slack": {
+      "key": "slack",
+      "displayName": "Slack",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "slack",
+      "pingEndpoint": "/api/auth.test",
+      "models": [
+        "SlackChannel",
+        "SlackMessage",
+        "SlackUser"
+      ],
+      "actions": [
+        "send-message",
+        "send-dm",
+        "update-message",
+        "add-reaction"
+      ],
+      "scopes": [
+        "chat:write",
+        "channels:read",
+        "users:read"
+      ],
+      "rateLimits": {
+        "requestsPerMinute": 50,
+        "requestsPerDay": 10000
+      },
+      "aliases": []
+    },
+    
+    "notion": {
+      "key": "notion",
+      "displayName": "Notion",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "notion",
+      "pingEndpoint": "/v1/users/me",
+      "models": [
+        "NotionPage",
+        "NotionDatabase",
+        "NotionBlock"
+      ],
+      "actions": [
+        "create-page",
+        "update-page",
+        "create-database-item",
+        "search"
+      ],
+      "scopes": [],
+      "rateLimits": {
+        "requestsPerMinute": 3,
+        "requestsPerDay": 1000
+      },
+      "aliases": []
+    },
+    
+    "outlook": {
+      "key": "outlook",
+      "displayName": "Outlook",
+      "adapterType": "nango",
+      "nangoProviderConfigKey": "outlook",
+      "pingEndpoint": "/me",
+      "models": [
+        "OutlookMessage",
+        "OutlookCalendarEvent"
+      ],
+      "actions": [
+        "send-email",
+        "reply-email",
+        "create-event"
+      ],
+      "scopes": [
+        "Mail.Read",
+        "Mail.Send",
+        "Calendars.ReadWrite"
+      ],
+      "rateLimits": {
+        "requestsPerMinute": 60,
+        "requestsPerDay": 10000
+      },
+      "aliases": ["microsoft-outlook", "office365"]
+    }
+  },
+  
+  "defaults": {
+    "adapterType": "nango",
+    "warmingCacheTtlMs": 300000,
+    "connectionTimeoutMs": 30000,
+    "retryAttempts": 3,
+    "retryBackoffMs": 1000
+  },
+  
+  "eventMappings": {
+    "gmail": {
+      "email_received": "GMAIL_MESSAGE_RECEIVED",
+      "email_sent": "GMAIL_MESSAGE_SENT",
+      "email_reply_received": "GMAIL_REPLY_RECEIVED"
+    },
+    "google-calendar": {
+      "event_created": "CALENDAR_EVENT_CREATED",
+      "event_updated": "CALENDAR_EVENT_UPDATED",
+      "event_deleted": "CALENDAR_EVENT_DELETED",
+      "event_starting": "CALENDAR_EVENT_STARTING",
+      "event_rsvp_changed": "CALENDAR_RSVP_CHANGED"
+    },
+    "salesforce": {
+      "lead_created": "SALESFORCE_LEAD_CREATED",
+      "lead_stage_changed": "SALESFORCE_LEAD_STAGE_CHANGED",
+      "lead_converted": "SALESFORCE_LEAD_CONVERTED",
+      "opportunity_created": "SALESFORCE_OPPORTUNITY_CREATED",
+      "opportunity_stage_changed": "SALESFORCE_OPPORTUNITY_STAGE_CHANGED",
+      "opportunity_amount_changed": "SALESFORCE_OPPORTUNITY_AMOUNT_CHANGED",
+      "opportunity_closed_won": "SALESFORCE_OPPORTUNITY_WON",
+      "opportunity_closed_lost": "SALESFORCE_OPPORTUNITY_LOST"
+    }
+  }
+}

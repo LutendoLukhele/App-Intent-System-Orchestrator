@@ -1,0 +1,234 @@
+services:
+  # Main Backend Application with Bootstrap Configuration
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: beat-engine-backend
+    ports:
+      - "${APP_PORT:-8080}:8080"
+      - "9090:9090"  # Metrics port for Prometheus
+    environment:
+      NODE_ENV: production
+      PORT: 8080
+      REDIS_URL: redis://:${REDIS_PASSWORD:-redis_secure_pass}@redis:6379
+      DATABASE_URL: ${DATABASE_URL}
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      NANGO_SECRET_KEY: ${NANGO_SECRET_KEY}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      # Bootstrap Rate Limiting
+      RATE_LIMIT_ENABLED: "true"
+      RATE_LIMIT_WINDOW_MS: "60000"
+      RATE_LIMIT_MAX_REQUESTS: "300"
+      RATE_LIMIT_LLM_WINDOW_MS: "300000"
+      RATE_LIMIT_LLM_MAX_REQUESTS: "50"
+      RATE_LIMIT_WEBHOOK_MAX: "100"
+      # Capacity Monitoring Thresholds
+      CPU_THRESHOLD_WARNING: "70"
+      CPU_THRESHOLD_CRITICAL: "85"
+      MEMORY_THRESHOLD_WARNING: "80"
+      MEMORY_THRESHOLD_CRITICAL: "92"
+      DB_POOL_MIN: "5"
+      DB_POOL_MAX: "20"
+      SCALE_UP_TRIGGER_CPU: "80"
+      SCALE_UP_TRIGGER_MEMORY: "85"
+    depends_on:
+      redis:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+    volumes:
+      - ./logs:/app/logs
+      - ./sessions:/app/sessions
+      - ./data:/app/data
+    restart: unless-stopped
+    networks:
+      - backend-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health/detailed"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "10"
+        labels: "service=beat-engine-backend"
+    deploy:
+      resources:
+        limits:
+          cpus: '3'
+          memory: 4G
+        reservations:
+          cpus: '1.5'
+          memory: 2G
+
+  # PostgreSQL Database (Optional - using Neon for bootstrap)
+  # Comment out if using Neon cloud DB (recommended for bootstrap)
+  # postgres:
+  #   image: postgres:15-alpine
+  #   container_name: beat-engine-postgres
+  #   environment:
+  #     POSTGRES_USER: ${DB_USER:-beat_user}
+  #     POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
+  #     POSTGRES_DB: ${DB_NAME:-beat_engine}
+  #     POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data
+  #   ports:
+  #     - "${DB_PORT:-5432}:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-beat_user}"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 5
+  #   restart: unless-stopped
+  #   networks:
+  #     - backend-network
+  #   logging:
+  #     driver: "json-file"
+  #     options:
+  #       max-size: "50m"
+  #       max-file: "5"
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: beat-engine-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-beat_user}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
+      POSTGRES_DB: ${DB_NAME:-beat_engine}
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "${DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-beat_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Redis Cache with persistence enabled
+  redis:
+    image: redis:7-alpine
+    container_name: beat-engine-redis
+    command: redis-server --appendonly yes --appendfsync everysec --requirepass ${REDIS_PASSWORD:-redis_secure_pass} --maxmemory 1gb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD:-redis_secure_pass}", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
+        reservations:
+          memory: 512M
+
+  # Jaeger for Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    container_name: beat-engine-jaeger
+    ports:
+      - "16686:16686"  # Jaeger UI
+      - "4318:4318"    # OpenTelemetry HTTP receiver
+      - "6831:6831/udp" # Jaeger agent
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      MEMORY_MAX_TRACES: "10000"
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Prometheus for Metrics Collection (Optional)
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: beat-engine-prometheus
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9091:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Grafana for Visualization (Optional)
+  grafana:
+    image: grafana/grafana:latest
+    container_name: beat-engine-grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD:-admin}
+      GF_INSTALL_PLUGINS: "redis-datasource"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+    depends_on:
+      - prometheus
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local
+
+networks:
+  backend-network:
+    driver: bridge

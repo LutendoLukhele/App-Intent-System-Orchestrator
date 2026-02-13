@@ -46,31 +46,39 @@ const getEnvVar = (key: string, defaultValue?: string, isCritical: boolean = fal
   return value;
 };
 
+
 export const CONFIG = {
-  
-    REDIS_URL: getEnvVar('REDIS_URL', 'redis://default:ewgkpSkF91VxHqMdZJ5mqHRpqaOut6jB@redis-15785.c276.us-east-1-2.ec2.redns.redis-cloud.com:15785'),
-    OPEN_AI_API_KEY: getEnvVar('OPEN_AI_API_KEY', undefined, true), // Mark as critical
-    GROQ_API_KEY: getEnvVar('GROQ_API_KEY', undefined, true),       // Mark as critical
-    CONNECTION_ID: getEnvVar('CONNECTION_ID', '2154ba8d-ce48-4a46-b4d3-295f1aa9e450'), // User-specific, might not always be in .env
-    MODEL_NAME: getEnvVar('MODEL_NAME', 'llama-3.3-70b-versatile'),
-    MAX_TOKENS: parseInt(getEnvVar('MAX_TOKENS', '1000')),
-    STREAM_CHUNK_SIZE: parseInt(getEnvVar('STREAM_CHUNK_SIZE', '100')),
-    TOOL_CONFIG_PATH: getEnvVar('TOOL_CONFIG_PATH', './config/tool-config.json'),
-    NANGO_SECRET_KEY: getEnvVar('NANGO_SECRET_KEY', '2065f150-7636-4592-8418-5affe59a5d94'), // Potentially critical depending on usage
-    PROVIDER_CONFIG_KEY: getEnvVar('PROVIDER_CONFIG_KEY', 'salesforce-ybzg'),
-    // CONNECTION_ID is user-specific and should not be a global config. It will be fetched dynamically.
-    NANGO_BASE_URL: getEnvVar('NANGO_BASE_URL', 'https://api.nango.dev'),
-    FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY'), // Often needed
-    FIREBASE_AUTH_DOMAIN: getEnvVar('FIREBASE_AUTH_DOMAIN'),
-    FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID'),     // Critical for Firebase
-    FIREBASE_STORAGE_BUCKET: getEnvVar('FIREBASE_STORAGE_BUCKET'),
-    FIREBASE_MESSAGING_SENDER_ID: getEnvVar('FIREBASE_MESSAGING_SENDER_ID'),
-    FIREBASE_APP_ID: getEnvVar('FIREBASE_APP_ID'),
-    FIREBASE_PRIVATE_KEY: getEnvVar('FIREBASE_PRIVATE_KEY'),
-    FIREBASE_CLIENT_EMAIL: getEnvVar('FIREBASE_CLIENT_EMAIL', 'lutendolukheles@gmail.com'),
-    FIREBASE_MEASUREMENT_ID: getEnvVar('FIREBASE_MEASUREMENT_ID'), // Optional
-    NODE_ENV: nodeEnv, // Add NODE_ENV to CONFIG as well
-  };
+  REDIS_URL: getEnvVar('REDIS_URL', 'redis://default:ewgkpSkF91VxHqMdZJ5mqHRpqaOut6jB@redis-15785.c276.us-east-1-2.ec2.redns.redis-cloud.com:15785'),
+  OPEN_AI_API_KEY: getEnvVar('OPEN_AI_API_KEY', undefined, true),
+  GROQ_API_KEY: getEnvVar('GROQ_API_KEY', undefined, true),
+  CONNECTION_ID: getEnvVar('CONNECTION_ID', '2154ba8d-ce48-4a46-b4d3-295f1aa9e450'),
+  MODEL_NAME: getEnvVar('MODEL_NAME', 'llama-3.3-70b-versatile'),
+  MAX_TOKENS: parseInt(getEnvVar('MAX_TOKENS', '1000')),
+  STREAM_CHUNK_SIZE: parseInt(getEnvVar('STREAM_CHUNK_SIZE', '100')),
+  TOOL_CONFIG_PATH: getEnvVar('TOOL_CONFIG_PATH', './config/tool-config.json'),
+  NANGO_SECRET_KEY: getEnvVar('NANGO_SECRET_KEY', '2065f150-7636-4592-8418-5affe59a5d94'),
+  PROVIDER_CONFIG_KEY: getEnvVar('PROVIDER_CONFIG_KEY', 'salesforce-ybzg'),
+  NANGO_BASE_URL: getEnvVar('NANGO_BASE_URL', 'https://api.nango.dev'),
+  FIREBASE_API_KEY: getEnvVar('FIREBASE_API_KEY'),
+  FIREBASE_AUTH_DOMAIN: getEnvVar('FIREBASE_AUTH_DOMAIN'),
+  FIREBASE_PROJECT_ID: getEnvVar('FIREBASE_PROJECT_ID'),
+  FIREBASE_STORAGE_BUCKET: getEnvVar('FIREBASE_STORAGE_BUCKET'),
+  FIREBASE_MESSAGING_SENDER_ID: getEnvVar('FIREBASE_MESSAGING_SENDER_ID'),
+  FIREBASE_APP_ID: getEnvVar('FIREBASE_APP_ID'),
+  FIREBASE_PRIVATE_KEY: getEnvVar('FIREBASE_PRIVATE_KEY'),
+  FIREBASE_CLIENT_EMAIL: getEnvVar('FIREBASE_CLIENT_EMAIL', 'lutendolukheles@gmail.com'),
+  FIREBASE_MEASUREMENT_ID: getEnvVar('FIREBASE_MEASUREMENT_ID'),
+  STRIPE_SECRET_KEY_TEST: getEnvVar('STRIPE_SECRET_KEY_TEST', undefined, false),
+  STRIPE_SECRET_KEY_LIVE: getEnvVar('STRIPE_SECRET_KEY_LIVE', undefined, false),
+  STRIPE_PRICE_ID: getEnvVar('STRIPE_PRICE_ID', undefined, false),
+  STRIPE_WEBHOOK_SECRET: getEnvVar('STRIPE_WEBHOOK_SECRET', undefined, false),
+  APP_SUCCESS_URL: getEnvVar('APP_SUCCESS_URL', 'https://yourapp.com/success', false),
+  DATABASE_URL: getEnvVar('DATABASE_URL', undefined, true),
+  NODE_ENV: nodeEnv,
+  // RevenueCat secret for backend-to-backend API
+  REVENUECAT_SECRET_KEY: getEnvVar('REVENUECAT_SECRET_KEY', undefined, false),
+  REVENUCAT_API_KEY: getEnvVar('REVENUCAT_API_KEY', undefined, false),
+};
 
 console.log('[config/index.ts] Final CONFIG object (Firebase relevant parts):');
 console.log(`[config/index.ts]   CONFIG.FIREBASE_PROJECT_ID: '${CONFIG.FIREBASE_PROJECT_ID}'`);

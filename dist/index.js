@@ -43,10 +43,19 @@ const ioredis_1 = __importDefault(require("ioredis"));
 const cors_1 = __importDefault(require("cors"));
 const http_1 = require("http");
 const ws_1 = require("ws");
-const winston_1 = __importDefault(require("winston"));
 const uuid_1 = require("uuid");
 const groq_sdk_1 = __importDefault(require("groq-sdk"));
 const storage = __importStar(require("node-persist"));
+const telemetry_1 = require("./monitoring/telemetry");
+const logging_1 = require("./monitoring/logging");
+const security_1 = require("./monitoring/security");
+const metrics_1 = require("./monitoring/metrics");
+const health_1 = require("./monitoring/health");
+const error_handling_1 = require("./monitoring/error-handling");
+const bootstrap_rate_limiting_1 = require("./middleware/bootstrap-rate-limiting");
+const bootstrap_capacity_monitor_1 = require("./monitoring/bootstrap-capacity-monitor");
+(0, telemetry_1.initializeTelemetry)();
+const logger = (0, logging_1.createStructuredLogger)('beat-engine-backend');
 const config_1 = require("./config");
 const firebase_1 = require("./firebase");
 const redis = new ioredis_1.default(config_1.CONFIG.REDIS_URL);
@@ -82,11 +91,8 @@ const interpret_1 = __importDefault(require("./routes/interpret"));
 const sessions_1 = __importDefault(require("./routes/sessions"));
 const HistoryService_1 = require("./services/HistoryService");
 const history_1 = __importDefault(require("./routes/history"));
-const logger = winston_1.default.createLogger({
-    level: 'info',
-    format: winston_1.default.format.combine(winston_1.default.format.timestamp(), winston_1.default.format.json()),
-    transports: [new winston_1.default.transports.Console()],
-});
+const StripeService_1 = require("./services/StripeService");
+const RevenueCatService_1 = require("./services/RevenueCatService");
 const groqClient = new groq_sdk_1.default({ apiKey: config_1.CONFIG.GROQ_API_KEY });
 const toolConfigManager = new ToolConfigManager_1.ToolConfigManager();
 if (!process.env.DATABASE_URL) {
@@ -113,6 +119,9 @@ const toolOrchestrator = new ToolOrchestrator_1.ToolOrchestrator({
 const plannerService = new PlannerService_1.PlannerService(config_1.CONFIG.GROQ_API_KEY, config_1.CONFIG.MAX_TOKENS, toolConfigManager, providerAwareFilter);
 const beatEngine = new BeatEngine_1.BeatEngine(toolConfigManager);
 const historyService = new HistoryService_1.HistoryService(redis);
+const nangoCircuitBreaker = new error_handling_1.CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
+const groqCircuitBreaker = new error_handling_1.CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
+const stripeCircuitBreaker = new error_handling_1.CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
 const conversationService = new ConversationService_1.ConversationService({
     groqApiKey: config_1.CONFIG.GROQ_API_KEY,
     model: config_1.CONFIG.MODEL_NAME,
@@ -180,9 +189,87 @@ async function streamText(sessionId, messageId, text) {
     streamManager.sendChunk(sessionId, { type: 'stream_end', isFinal: true, messageId, streamType: 'conversational' });
 }
 const app = (0, express_1.default)();
-app.use((0, cors_1.default)());
+app.use(logging_1.traceContextMiddleware);
+app.use((0, security_1.securityHeadersMiddleware)());
+app.use((0, logging_1.httpLoggingMiddleware)(logger));
+app.use(security_1.globalRateLimiter);
+app.use((0, security_1.validateTokenExpiry)(logger));
+(0, bootstrap_rate_limiting_1.setupBootstrapMiddleware)(app, redis);
+app.use((0, cors_1.default)((0, security_1.corsOptionsSecure)()));
 app.use(express_1.default.json({ limit: '50mb' }));
 app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
+const healthChecks = new Map();
+healthChecks.set('database', async () => {
+    try {
+        const result = await sql `SELECT 1`;
+        return !!result;
+    }
+    catch (err) {
+        logger.error('Database health check failed', err);
+        return false;
+    }
+});
+healthChecks.set('redis', async () => {
+    try {
+        await redis.ping();
+        return true;
+    }
+    catch (err) {
+        logger.error('Redis health check failed', err);
+        return false;
+    }
+});
+app.use((0, health_1.createHealthRouter)(logger, healthChecks));
+app.get('/metrics/bootstrap', (req, res) => {
+    try {
+        const metrics = bootstrap_capacity_monitor_1.bootstrapMonitor.getMetrics();
+        res.json({ metrics, timestamp: Date.now() });
+    }
+    catch (err) {
+        logger.error('Failed to get bootstrap metrics', err);
+        res.status(500).json({ error: 'Failed to retrieve metrics' });
+    }
+});
+app.get('/bootstrap-status', (req, res) => {
+    try {
+        const metrics = bootstrap_capacity_monitor_1.bootstrapMonitor.getMetrics();
+        const healthStatus = bootstrap_capacity_monitor_1.bootstrapMonitor.getHealthStatus();
+        const scaling = bootstrap_capacity_monitor_1.bootstrapMonitor.getScalingRecommendation();
+        res.json({
+            status: healthStatus,
+            metrics,
+            scaling,
+            timestamp: Date.now(),
+            uptime: process.uptime()
+        });
+    }
+    catch (err) {
+        logger.error('Failed to get bootstrap status', err);
+        res.status(500).json({ error: 'Failed to retrieve status' });
+    }
+});
+app.get('/health/detailed', (req, res) => {
+    try {
+        const metrics = bootstrap_capacity_monitor_1.bootstrapMonitor.getMetrics();
+        const healthStatus = bootstrap_capacity_monitor_1.bootstrapMonitor.getHealthStatus();
+        res.json({
+            status: 'healthy',
+            checks: {
+                cpu: { status: metrics.cpu.percent < 85 ? 'ok' : 'warning', value: `${metrics.cpu.percent}%` },
+                memory: { status: metrics.memory.percent < 92 ? 'ok' : 'warning', value: `${metrics.memory.percent}%` },
+                database: { status: 'ok', connections: metrics.database.active_connections },
+                redis: { status: 'ok' },
+                uptime: { value: `${Math.floor(process.uptime())}s` }
+            },
+            metrics,
+            timestamp: Date.now()
+        });
+    }
+    catch (err) {
+        logger.error('Failed to get detailed health', err);
+        res.status(500).json({ error: 'Health check failed' });
+    }
+});
 app.use('/api/artifacts', artifacts_1.default);
 app.use('/api/documents', documents_1.default);
 app.use('/api/export', export_1.default);
@@ -298,6 +385,43 @@ app.post('/api/webhooks/nango', async (req, res) => {
                 });
             });
         }
+        else if (payload.type === 'auth') {
+            (async () => {
+                try {
+                    const { connectionId, providerConfigKey } = payload;
+                    if (!connectionId || !providerConfigKey) {
+                        logger.warn('Auth webhook missing required fields', { payload });
+                        return;
+                    }
+                    const cachedUserId = await redis.get(`connection-owner:${connectionId}`);
+                    if (cachedUserId) {
+                        logger.info('Auto-registering connection from auth webhook', {
+                            userId: cachedUserId,
+                            connectionId: connectionId.substring(0, 12) + '...',
+                            provider: providerConfigKey
+                        });
+                        await registerConnectionForUser(cachedUserId, providerConfigKey, connectionId);
+                        await userToolCacheService.invalidateUserToolCache(cachedUserId);
+                        logger.info('Connection auto-registered successfully from auth webhook', {
+                            userId: cachedUserId,
+                            provider: providerConfigKey
+                        });
+                    }
+                    else {
+                        logger.warn('No cached userId found for connection from auth webhook', {
+                            connectionId: connectionId.substring(0, 12) + '...',
+                            hint: 'Frontend should call /api/connections POST after OAuth'
+                        });
+                    }
+                }
+                catch (err) {
+                    logger.error('Failed to auto-register connection from auth webhook', {
+                        error: err.message,
+                        stack: err.stack
+                    });
+                }
+            })();
+        }
         else {
             logger.warn('Received non-sync webhook type', { type: payload.type });
         }
@@ -305,6 +429,186 @@ app.post('/api/webhooks/nango', async (req, res) => {
     catch (err) {
         logger.error('Nango webhook error', { error: err.message, stack: err.stack });
         res.status(500).json({ error: err.message });
+    }
+});
+app.post('/api/create-payment-link', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({
+                success: false,
+                error: 'Unauthorized - No token provided'
+            });
+        }
+        const idToken = authHeader.split('Bearer ')[1];
+        const decodedToken = await firebase_1.auth.verifyIdToken(idToken);
+        const firebaseUid = decodedToken.uid;
+        const email = decodedToken.email;
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email not found in Firebase token'
+            });
+        }
+        logger.info('Creating payment link', {
+            firebaseUid,
+            email,
+        });
+        const paymentUrl = await StripeService_1.stripeService.createPaymentLinkForUser(firebaseUid, email);
+        res.status(200).json({
+            success: true,
+            url: paymentUrl
+        });
+    }
+    catch (error) {
+        logger.error('Failed to create payment link', {
+            error: error.message,
+            stack: error.stack
+        });
+        res.status(500).json({
+            success: false,
+            error: error.message || 'Failed to create payment link'
+        });
+    }
+});
+app.post('/api/create-payment-link-public', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ error: 'Valid email required' });
+        }
+        logger.info(`🌐 Public payment link request for: ${email}`);
+        const tempUserId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        const urlWithEmail = await StripeService_1.stripeService.createPaymentLinkWithMetadata(tempUserId, email, 'landing_page');
+        logger.info(`✅ Created public payment link: ${tempUserId}`);
+        res.json({ success: true, url: urlWithEmail });
+    }
+    catch (error) {
+        logger.error('Public payment link error', { error: error.message });
+        res.status(500).json({ error: 'Failed to create payment link', details: error.message });
+    }
+});
+app.post('/api/link-subscription', async (req, res) => {
+    try {
+        const { firebaseUid, email, tempUserId } = req.body;
+        const authHeader = req.headers.authorization;
+        if (!authHeader?.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing authorization token' });
+        }
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await firebase_1.auth.verifyIdToken(token);
+        if (decodedToken.uid !== firebaseUid) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        logger.info(`🔗 Linking subscription for ${email} to ${firebaseUid}`);
+        const revenuecatSecret = process.env.REVENUECAT_SECRET_KEY || process.env.REVENUCAT_API_KEY;
+        if (!revenuecatSecret) {
+            logger.error('REVENUECAT_SECRET_KEY is not set');
+            return res.status(500).json({ error: 'RevenueCat secret key not configured' });
+        }
+        const transferUrl = `https://api.revenuecat.com/v1/subscribers/${tempUserId}/alias`;
+        const transferResp = await fetch(transferUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${revenuecatSecret}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ new_app_user_id: firebaseUid })
+        });
+        if (!transferResp.ok) {
+            const errText = await transferResp.text();
+            logger.error('RevenueCat transfer failed', { status: transferResp.status, errText });
+            return res.status(500).json({ error: 'Failed to link subscription', details: errText });
+        }
+        const attrUrl = `https://api.revenuecat.com/v1/subscribers/${firebaseUid}/attributes`;
+        await fetch(attrUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${revenuecatSecret}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ attributes: { email: { value: email } } })
+        });
+        res.json({ success: true });
+    }
+    catch (error) {
+        logger.error('Link subscription error', { error: error.message });
+        res.status(500).json({ error: 'Failed to link subscription', details: error.message });
+    }
+});
+app.get('/success', (req, res) => {
+    try {
+        const email = req.query.email ? `?email=${encodeURIComponent(req.query.email)}` : '';
+        const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Purchase Successful!</title>
+        <link rel="stylesheet" href="/success.css">
+      </head>
+      <body>
+        <div id="root"></div>
+        <script src="/success.js"></script>
+      </body>
+      </html>
+    `;
+        res.setHeader('Content-Type', 'text/html');
+        res.send(html);
+    }
+    catch (error) {
+        logger.error('Success page error', { error: error.message });
+        res.status(500).json({ error: 'Failed to load success page' });
+    }
+});
+app.post('/api/webhooks/stripe', express_1.default.raw({ type: 'application/json' }), async (req, res) => {
+    try {
+        const signature = req.headers['stripe-signature'];
+        const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+        const event = StripeService_1.stripeService.verifyWebhookSignature(body, signature);
+        if (!event) {
+            logger.warn('Stripe webhook signature verification failed');
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+        logger.info('Stripe webhook received (audit log only)', {
+            eventType: event.type,
+            eventId: event.id,
+            note: 'Main processing happens in RevenueCat'
+        });
+        res.status(200).json({ received: true });
+    }
+    catch (err) {
+        logger.error('Stripe webhook error', {
+            error: err.message,
+            stack: err.stack
+        });
+        res.status(200).json({ error: 'processed with error' });
+    }
+});
+app.get('/api/subscription', async (req, res) => {
+    try {
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Unauthorized - No token provided' });
+        }
+        const idToken = authHeader.split('Bearer ')[1];
+        const decodedToken = await firebase_1.auth.verifyIdToken(idToken);
+        const firebaseUid = decodedToken.uid;
+        const isSubscribed = await RevenueCatService_1.revenueCatService.isUserSubscribed(firebaseUid);
+        const activeEntitlements = await RevenueCatService_1.revenueCatService.getActiveEntitlements(firebaseUid);
+        res.json({
+            success: true,
+            isSubscribed,
+            entitlements: activeEntitlements
+        });
+    }
+    catch (err) {
+        logger.error('Failed to get subscription info', { error: err.message });
+        res.status(500).json({
+            success: false,
+            error: err.message
+        });
     }
 });
 app.post('/api/debug/force-sync', async (req, res) => {
@@ -334,9 +638,26 @@ app.post('/api/debug/force-sync', async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 });
-app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+app.use((req, res, next) => {
+    const contentLength = parseInt(req.get('content-length') || '0');
+    if (contentLength > 0) {
+        metrics_1.httpRequestSize.observe({ method: req.method, route: req.path }, contentLength);
+    }
+    const originalSend = res.send;
+    res.send = function (data) {
+        const responseSize = Buffer.byteLength(JSON.stringify(data));
+        metrics_1.httpResponseSize.observe({ method: req.method, route: req.path, status_code: res.statusCode }, responseSize);
+        return originalSend.call(this, data);
+    };
+    const start = Date.now();
+    res.on('finish', () => {
+        const duration = (Date.now() - start) / 1000;
+        metrics_1.httpRequestDuration.observe({ method: req.method, route: req.path, status_code: res.statusCode }, duration);
+        metrics_1.httpRequestsTotal.inc({ method: req.method, route: req.path, status_code: res.statusCode });
+    });
+    next();
 });
+app.use((0, security_1.secureErrorHandler)(logger));
 const server = (0, http_1.createServer)(app);
 const wss = new ws_1.WebSocketServer({ server });
 actionLauncherService.on('send_chunk', (sessionId, chunk) => {
@@ -1319,6 +1640,19 @@ wss.on('connection', (ws, req) => {
     });
 });
 const PORT = process.env.PORT || 8080;
+setInterval(() => {
+    const memUsage = process.memoryUsage();
+    const { memoryUsageBytes } = require('./monitoring/metrics');
+    if (memoryUsageBytes && typeof memoryUsageBytes.set === 'function') {
+        memoryUsageBytes.set({ type: 'heapUsed' }, memUsage.heapUsed);
+        memoryUsageBytes.set({ type: 'heapTotal' }, memUsage.heapTotal);
+        memoryUsageBytes.set({ type: 'external' }, memUsage.external);
+        memoryUsageBytes.set({ type: 'rss' }, memUsage.rss);
+    }
+    if (metrics_1.uptime && typeof metrics_1.uptime.set === 'function') {
+        metrics_1.uptime.set(process.uptime());
+    }
+}, 30000);
 server.listen(PORT, () => console.log(`🚀 Server is listening on port ${PORT}`));
 process.on('SIGTERM', () => {
     logger.info('SIGTERM signal received: closing HTTP server');

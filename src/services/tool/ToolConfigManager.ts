@@ -1,9 +1,11 @@
 // Complete ToolConfigManager.ts with proper loading for your config structure
+// Implements IToolProvider interface for ASO decoupling
 
 import fs from 'fs';
 import path from 'path';
 import winston from 'winston';
 import Ajv from 'ajv';
+import { IToolProvider, ToolConfig as IToolConfig } from '../interfaces';
 
 const logger = winston.createLogger({
   level: 'info',
@@ -39,7 +41,7 @@ export interface ToolConfig {
   cache_model?: string;
 }
 
-export class ToolConfigManager {
+export class ToolConfigManager implements IToolProvider {
   [x: string]: any;
   private toolConfigs: Record<string, ToolConfig[]> = {};
   private ajv: InstanceType<typeof Ajv>;
@@ -308,7 +310,10 @@ export class ToolConfigManager {
     const valid = validate(args);
 
     if (!valid) {
-      const errors = validate.errors?.map(e => `${e.dataPath} ${e.message}`).join(', ') || 'Validation failed';
+      const errors = validate.errors?.map(e => {
+        const path = (e as any).dataPath || (e as any).instancePath || '';
+        return `${path} ${e.message}`;
+      }).join(', ') || 'Validation failed';
       logger.warn('Validation failed', { toolName, args, errors });
       throw new Error(errors);
     }
@@ -427,5 +432,88 @@ export class ToolConfigManager {
     });
 
     return providerKey;
+  }
+
+  // ============================================================
+  // IToolProvider Interface Implementation
+  // ============================================================
+
+  /**
+   * Get tool by name (IToolProvider interface)
+   */
+  public getToolByName(name: string): ToolConfig | undefined {
+    return this.getToolDefinition(name);
+  }
+
+  /**
+   * Get tools by single category (IToolProvider interface)
+   */
+  public getToolsByCategory(category: string): ToolConfig[] {
+    return this.toolConfigs[category] || [];
+  }
+
+  /**
+   * Get tools by provider key (IToolProvider interface)
+   * Maps provider keys to their associated tools
+   */
+  public getToolsByProvider(providerKey: string): ToolConfig[] {
+    const allTools = this.getAllTools();
+    const normalizedKey = providerKey.trim().toLowerCase();
+    
+    return allTools.filter(tool => {
+      const toolProviderKey = tool.providerConfigKey?.trim().toLowerCase();
+      return toolProviderKey === normalizedKey;
+    });
+  }
+
+  /**
+   * Get all unique categories (IToolProvider interface)
+   */
+  public getCategories(): string[] {
+    return Object.keys(this.toolConfigs);
+  }
+
+  /**
+   * Get all unique provider keys (IToolProvider interface)
+   */
+  public getProviders(): string[] {
+    const providerKeys = new Set<string>();
+    
+    this.getAllTools().forEach(tool => {
+      if (tool.providerConfigKey) {
+        providerKeys.add(tool.providerConfigKey);
+      }
+    });
+
+    return Array.from(providerKeys);
+  }
+
+  /**
+   * Format tools for LLM consumption (IToolProvider interface)
+   * Converts internal tool format to LLM-compatible function definitions
+   */
+  public formatToolsForLLM(tools: ToolConfig[]): any[] {
+    return tools.map(tool => ({
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters ? this.cleanSchemaForGroq(tool.parameters) : {
+          type: 'object',
+          properties: {},
+          required: []
+        }
+      }
+    }));
+  }
+
+  /**
+   * Reload configuration (IToolProvider interface - optional)
+   */
+  public async reload(): Promise<void> {
+    this.toolConfigs = {};
+    this.loadToolConfigs();
+    this.validateToolConfiguration();
+    logger.info('ToolConfigManager: Configuration reloaded');
   }
 }

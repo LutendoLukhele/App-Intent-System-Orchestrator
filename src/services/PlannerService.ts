@@ -8,6 +8,8 @@ import { EventEmitter } from 'events';
 import { StreamChunk } from './stream/types';
 import { ChatCompletionMessageParam } from 'groq-sdk/resources/chat/completions';
 import { MessageType } from './conversation/types';
+import { ILLMClient, IToolProvider, IToolFilter, ChatMessage } from './interfaces';
+
 const logger = winston.createLogger({
   level: 'info',
   format: winston.format.combine(
@@ -39,56 +41,228 @@ type PlannerStatusChunk = {
   isFinal: true;
 };
 
+// ============================================================
+// Configuration Interface for Dependency Injection
+// ============================================================
+
+/**
+ * Configuration for PlannerService with interface-based dependencies
+ * Enables swapping implementations (e.g., different LLM providers)
+ */
+export interface PlannerConfig {
+  /** LLM client for chat completions (required) */
+  llmClient: ILLMClient;
+  
+  /** Tool definition provider (required) */
+  toolProvider: IToolProvider;
+  
+  /** Optional user capability filter */
+  toolFilter?: IToolFilter;
+  
+  /** Maximum tokens for LLM response */
+  maxTokens: number;
+  
+  /** Model name override (optional) */
+  model?: string;
+  
+  /** Custom prompt template (optional) */
+  promptTemplate?: string;
+}
+
+/**
+ * Legacy configuration for backward compatibility
+ */
+export interface LegacyPlannerConfig {
+  groqApiKey: string;
+  maxTokens: number;
+  toolConfigManager: ToolConfigManager;
+  providerAwareFilter?: ProviderAwareToolFilter;
+}
+
 export class PlannerService extends EventEmitter {
-  private groqClient: Groq;
+  // Interface-based dependencies
+  private llmClient: ILLMClient;
+  private toolProvider: IToolProvider;
+  private toolFilter?: IToolFilter;
   private maxTokens: number;
-  private toolConfigManager: ToolConfigManager;
+  private model: string;
+  
+  // Legacy support - keep reference if using legacy constructor
+  private groqClient?: Groq;
+  private toolConfigManager?: ToolConfigManager;
   private providerAwareFilter?: ProviderAwareToolFilter;
 
-  // Using Llama 3.3 70B - the most capable model on Groq
-  private static readonly MODEL = 'llama-3.3-70b-versatile';
+  // Default model
+  private static readonly DEFAULT_MODEL = 'llama-3.3-70b-versatile';
 
+  /**
+   * New interface-based constructor
+   * @param config - Configuration with injected dependencies
+   */
+  constructor(config: PlannerConfig);
+  
+  /**
+   * Legacy constructor for backward compatibility
+   * @deprecated Use new PlannerService({ llmClient, toolProvider, ... }) instead
+   */
   constructor(
     groqApiKey: string,
     maxTokens: number,
     toolConfigManager: ToolConfigManager,
     providerAwareFilter?: ProviderAwareToolFilter
+  );
+  
+  constructor(
+    configOrApiKey: PlannerConfig | string,
+    maxTokens?: number,
+    toolConfigManager?: ToolConfigManager,
+    providerAwareFilter?: ProviderAwareToolFilter
   ) {
     super();
 
-    // Debug logging
-    logger.info('PlannerService constructor called', {
-      apiKeyProvided: !!groqApiKey,
-      apiKeyLength: groqApiKey?.length || 0,
-      apiKeyPrefix: groqApiKey?.substring(0, 10) || 'NONE',
-      apiKeyType: typeof groqApiKey
-    });
-
-    // Validate API key
-    if (!groqApiKey || groqApiKey.trim() === '') {
-      throw new Error('GROQ_API_KEY is required but was not provided');
-    }
-
-    // Validate it starts with gsk_
-    if (!groqApiKey.startsWith('gsk_')) {
-      logger.error('Invalid Groq API key format - must start with gsk_', {
-        receivedPrefix: groqApiKey.substring(0, 4)
+    // Detect which constructor signature is being used
+    if (typeof configOrApiKey === 'object' && 'llmClient' in configOrApiKey) {
+      // New interface-based constructor
+      const config = configOrApiKey as PlannerConfig;
+      
+      this.llmClient = config.llmClient;
+      this.toolProvider = config.toolProvider;
+      this.toolFilter = config.toolFilter;
+      this.maxTokens = config.maxTokens;
+      this.model = config.model || PlannerService.DEFAULT_MODEL;
+      
+      logger.info('PlannerService initialized with interface-based config', {
+        model: this.model,
+        maxTokens: this.maxTokens,
+        hasToolFilter: !!this.toolFilter
       });
-      throw new Error('Invalid Groq API key format - must start with gsk_');
+    } else {
+      // Legacy constructor - maintain backward compatibility
+      const groqApiKey = configOrApiKey as string;
+      
+      // Debug logging
+      logger.info('PlannerService legacy constructor called', {
+        apiKeyProvided: !!groqApiKey,
+        apiKeyLength: groqApiKey?.length || 0,
+        apiKeyPrefix: groqApiKey?.substring(0, 10) || 'NONE',
+        apiKeyType: typeof groqApiKey
+      });
+
+      // Validate API key
+      if (!groqApiKey || groqApiKey.trim() === '') {
+        throw new Error('GROQ_API_KEY is required but was not provided');
+      }
+
+      // Validate it starts with gsk_
+      if (!groqApiKey.startsWith('gsk_')) {
+        logger.error('Invalid Groq API key format - must start with gsk_', {
+          receivedPrefix: groqApiKey.substring(0, 4)
+        });
+        throw new Error('Invalid Groq API key format - must start with gsk_');
+      }
+
+      this.groqClient = new Groq({
+        apiKey: groqApiKey.trim()
+      });
+      this.maxTokens = maxTokens!;
+      this.toolConfigManager = toolConfigManager;
+      this.providerAwareFilter = providerAwareFilter;
+      this.model = PlannerService.DEFAULT_MODEL;
+      
+      // Create legacy adapter wrapper for ILLMClient
+      this.llmClient = this.createLegacyLLMAdapter(this.groqClient);
+      this.toolProvider = toolConfigManager!;
+      this.toolFilter = providerAwareFilter;
+
+      logger.info('PlannerService initialized with legacy Groq config', {
+        model: this.model,
+        maxTokens: this.maxTokens,
+        apiKeyValid: true
+      });
     }
-
-    this.groqClient = new Groq({
-      apiKey: groqApiKey.trim() // Trim any whitespace
-    });
-    this.maxTokens = maxTokens;
-    this.toolConfigManager = toolConfigManager;
-    this.providerAwareFilter = providerAwareFilter;
-
-    logger.info('PlannerService initialized with Groq', {
-      model: PlannerService.MODEL,
-      maxTokens,
-      apiKeyValid: true
-    });
+  }
+  
+  /**
+   * Creates an ILLMClient adapter wrapping the legacy Groq client
+   * Used for backward compatibility with existing code
+   */
+  private createLegacyLLMAdapter(groq: Groq): ILLMClient {
+    const model = this.model;
+    
+    return {
+      defaultModel: model,
+      providerName: 'groq',
+      
+      chat: async (options) => {
+        const response = await groq.chat.completions.create({
+          model: options.model || model,
+          messages: options.messages.map(m => ({
+            role: m.role as any,
+            content: m.content
+          })),
+          max_tokens: options.maxTokens,
+          temperature: options.temperature ?? 0.1,
+          response_format: options.responseFormat,
+          tools: options.tools,
+          tool_choice: options.toolChoice || options.tool_choice
+        });
+        
+        const choice = response.choices[0];
+        return {
+          content: choice?.message?.content || null,
+          toolCalls: choice?.message?.tool_calls?.map(tc => ({
+            id: tc.id,
+            type: 'function' as const,
+            function: {
+              name: tc.function.name,
+              arguments: tc.function.arguments
+            }
+          })) || null,
+          finishReason: (choice?.finish_reason as any) || 'stop',
+          usage: response.usage ? {
+            promptTokens: response.usage.prompt_tokens,
+            completionTokens: response.usage.completion_tokens,
+            totalTokens: response.usage.total_tokens
+          } : undefined
+        };
+      },
+      
+      chatStream: async function* (options) {
+        const stream = await groq.chat.completions.create({
+          model: options.model || model,
+          messages: options.messages.map(m => ({
+            role: m.role as any,
+            content: m.content
+          })),
+          max_tokens: options.maxTokens,
+          temperature: options.temperature ?? 0.5,
+          stream: true
+        });
+        
+        for await (const chunk of stream) {
+          const delta = chunk.choices[0]?.delta;
+          const finishReason = chunk.choices[0]?.finish_reason;
+          yield {
+            content: delta?.content || null,
+            finishReason: finishReason as any || null,
+            done: !!finishReason
+          };
+        }
+      },
+      
+      healthCheck: async () => {
+        try {
+          await groq.chat.completions.create({
+            model,
+            messages: [{ role: 'user', content: 'ping' }],
+            max_tokens: 1
+          });
+          return { healthy: true };
+        } catch (error: any) {
+          return { healthy: false, error: error.message };
+        }
+      }
+    };
   }
 
   async generatePlanWithStepAnnouncements(
@@ -134,17 +308,17 @@ Be specific but concise. Example: "I'll fetch your recent emails and then create
         messageType: MessageType.PLAN_SUMMARY
       });
 
-      const response = await this.groqClient.chat.completions.create({
-        model: PlannerService.MODEL,
+      // Use interface-based streaming
+      const streamGenerator = this.llmClient.chatStream({
         messages: [{ role: 'system', content: summaryPrompt }],
-        max_tokens: 100,
-        stream: true,
+        maxTokens: 100,
         temperature: 0.5,
+        model: this.model
       });
 
       let fullSummary = '';
-      for await (const chunk of response) {
-        const content = chunk.choices[0]?.delta?.content;
+      for await (const chunk of streamGenerator) {
+        const content = chunk.content;
         if (content) {
           fullSummary += content;
           this.emit('send_chunk', sessionId, {
@@ -205,16 +379,16 @@ Be specific about what's being done.`;
         metadata: { stepNumber: step.stepNumber, totalSteps: step.totalSteps }
       });
 
-      const response = await this.groqClient.chat.completions.create({
-        model: PlannerService.MODEL,
+      // Use interface-based streaming
+      const streamGenerator = this.llmClient.chatStream({
         messages: [{ role: 'system', content: announcementPrompt }],
-        max_tokens: 80,
-        stream: true,
+        maxTokens: 80,
         temperature: 0.5,
+        model: this.model
       });
 
-      for await (const chunk of response) {
-        const content = chunk.choices[0]?.delta?.content;
+      for await (const chunk of streamGenerator) {
+        const content = chunk.content;
         if (content) {
           this.emit('send_chunk', sessionId, {
             type: 'conversational_text_segment',
@@ -261,16 +435,16 @@ Result summary: ${JSON.stringify(result).slice(0, 300)}`;
         messageType: MessageType.STEP_COMPLETE
       });
 
-      const response = await this.groqClient.chat.completions.create({
-        model: PlannerService.MODEL,
+      // Use interface-based streaming
+      const streamGenerator = this.llmClient.chatStream({
         messages: [{ role: 'system', content: completionPrompt }],
-        max_tokens: 60,
-        stream: true,
+        maxTokens: 60,
         temperature: 0.5,
+        model: this.model
       });
 
-      for await (const chunk of response) {
-        const content = chunk.choices[0]?.delta?.content;
+      for await (const chunk of streamGenerator) {
+        const content = chunk.content;
         if (content) {
           this.emit('send_chunk', sessionId, {
             type: 'conversational_text_segment',
@@ -320,16 +494,16 @@ Be specific about what's being done. Example: "Okay, sending an email to John Do
         messageType: MessageType.TOOL_EXECUTION, // Using TOOL_EXECUTION as requested
       });
 
-      const response = await this.groqClient.chat.completions.create({
-        model: PlannerService.MODEL,
+      // Use interface-based streaming
+      const streamGenerator = this.llmClient.chatStream({
         messages: [{ role: 'system', content: announcementPrompt }],
-        max_tokens: 80,
-        stream: true,
+        maxTokens: 80,
         temperature: 0.5,
+        model: this.model
       });
 
-      for await (const chunk of response) {
-        const content = chunk.choices[0]?.delta?.content;
+      for await (const chunk of streamGenerator) {
+        const content = chunk.content;
         if (content) {
           this.emit('send_chunk', sessionId, {
             type: 'conversational_text_segment',
@@ -427,9 +601,9 @@ public async generatePlan(
 
   // Use provider-aware filtering if available and userId is provided
   let availableTools;
-  if (this.providerAwareFilter && userId) {
+  if (this.toolFilter && userId) {
     logger.info('PlannerService: Using provider-aware tool filtering', { userId });
-    const filteredTools = await this.providerAwareFilter.getAvailableToolsForUser(userId);
+    const filteredTools = await this.toolFilter.getAvailableToolsForUser(userId);
 
     if (filteredTools.length === 0) {
       // Don't fall back to all tools - user has no connected providers
@@ -453,7 +627,12 @@ public async generatePlan(
     }
   } else {
     logger.warn('PlannerService: Provider-aware filtering not available, using all tools');
-    availableTools = this.toolConfigManager.getToolDefinitionsForPlanner();
+    availableTools = this.toolProvider.getAllTools().map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      category: tool.category,
+      parameters: tool.parameters
+    }));
   }
 
   const toolDefinitionsJson = JSON.stringify(availableTools, null, 2);
@@ -466,7 +645,7 @@ public async generatePlan(
     });
   }
 
-  // Get provider context if available
+  // Get provider context if available (for legacy ProviderAwareToolFilter)
   let providerContext = '';
   if (this.providerAwareFilter && userId) {
     providerContext = await this.providerAwareFilter.getProviderContextForPrompt(userId);
@@ -489,15 +668,19 @@ public async generatePlan(
   ];
 
   try {
-    const response = await this.groqClient.chat.completions.create({
-      model: PlannerService.MODEL,
-      messages: messagesForApi as any,
-      max_tokens: this.maxTokens,
+    // Use interface-based chat completion
+    const response = await this.llmClient.chat({
+      model: this.model,
+      messages: [
+        { role: 'system', content: systemPromptContent },
+        { role: 'user', content: userInput }
+      ],
+      maxTokens: this.maxTokens,
       temperature: 0.1,
-      response_format: { type: "json_object" },
+      responseFormat: { type: "json_object" },
     });
 
-    const content = response.choices[0]?.message?.content;
+    const content = response.content;
     if (!content) {
       logger.error('PlannerService: No content from planning LLM', { sessionId });
       throw new Error('No content from planning LLM');

@@ -1,0 +1,39 @@
+{
+  "name": "@aso/cortex",
+  "version": "0.1.0",
+  "description": "Reactive automation system - Natural language to event-driven workflows",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "keywords": [
+    "aso",
+    "cortex",
+    "automation",
+    "reactive",
+    "event-driven",
+    "workflow"
+  ],
+  "author": "ASO Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "@aso/interfaces": "^0.1.0"
+  },
+  "peerDependencies": {
+    "ioredis": "^5.3.0",
+    "pg": "^8.11.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

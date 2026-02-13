@@ -47,6 +47,7 @@ export interface ProviderConfig {
     provider_config_key: string;
     connection_id: string;
     objects: string[];
+    aliases?: string[];
 }
 
 // New type definitions for advanced inputs

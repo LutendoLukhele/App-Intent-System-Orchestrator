@@ -2,13 +2,16 @@ import { ToolConfig, ToolConfigManager } from './ToolConfigManager';
 import { NeonQueryFunction } from '@neondatabase/serverless';
 import { UserToolCacheService } from './UserToolCacheService';
 import { getCanonicalProviderChain } from './providerAliases';
+import { IToolFilter, ToolAvailability } from '../interfaces';
 
 /**
  * Service for filtering tools based on user's actual provider configurations
  * This reduces token usage by only including tools the user can actually execute
  * Now with Redis caching for improved performance
+ * 
+ * Implements IToolFilter interface for ASO decoupling
  */
-export class ProviderAwareToolFilter {
+export class ProviderAwareToolFilter implements IToolFilter {
   constructor(
     private toolConfigManager: ToolConfigManager,
     private sql: NeonQueryFunction<false, false>,
@@ -220,6 +223,74 @@ export class ProviderAwareToolFilter {
     } catch (error) {
       console.error('[ProviderAwareToolFilter] Error getting provider context:', error);
       return "Unable to determine user's integrations. Proceed with caution.";
+    }
+  }
+
+  // ============================================================
+  // IToolFilter Interface Implementation
+  // ============================================================
+
+  /**
+   * Check if a specific tool is available for user (IToolFilter interface)
+   * Returns full ToolAvailability object
+   */
+  async isToolAvailable(userId: string, toolName: string): Promise<ToolAvailability> {
+    const availableTools = await this.getAvailableToolsForUser(userId);
+    const isAvailable = availableTools.some(tool => tool.name === toolName);
+    const toolDef = this.toolConfigManager.getToolDefinition(toolName);
+    
+    if (!toolDef) {
+      return {
+        tool: { name: toolName, description: 'Unknown tool', category: 'Unknown' },
+        available: false,
+        reason: 'Tool not found in configuration'
+      };
+    }
+
+    return {
+      tool: toolDef,
+      available: isAvailable,
+      reason: isAvailable 
+        ? undefined 
+        : toolDef.providerConfigKey 
+          ? `Provider '${toolDef.providerConfigKey}' not connected`
+          : 'No provider configured for this tool'
+    };
+  }
+
+  /**
+   * Get all tools with availability status (IToolFilter interface)
+   */
+  async getAllToolsWithAvailability(userId: string): Promise<ToolAvailability[]> {
+    const allTools = this.toolConfigManager.getAllTools();
+    const availableTools = await this.getAvailableToolsForUser(userId);
+    const availableNames = new Set(availableTools.map(t => t.name));
+
+    return allTools.map(tool => ({
+      tool,
+      available: availableNames.has(tool.name),
+      reason: availableNames.has(tool.name) 
+        ? undefined 
+        : tool.providerConfigKey 
+          ? `Provider '${tool.providerConfigKey}' not connected`
+          : 'No provider configured for this tool'
+    }));
+  }
+
+  /**
+   * Get set of connected providers (IToolFilter interface)
+   */
+  async getConnectedProviders(userId: string): Promise<Set<string>> {
+    return this.getActiveProvidersForUser(userId);
+  }
+
+  /**
+   * Invalidate cache for user (IToolFilter interface)
+   */
+  async invalidateCache(userId: string): Promise<void> {
+    if (this.cacheService) {
+      await this.cacheService.invalidateUserToolCache(userId);
+      console.log(`[ProviderAwareToolFilter] Cache invalidated for user ${userId}`);
     }
   }
 }

@@ -2,6 +2,10 @@ declare module 'csv-parser';
 declare module 'mammoth';
 declare module 'pdf-parse';
 declare module 'marked';
+declare module '*.css' {
+  const content: { [className: string]: string };
+  export default content;
+}
 
 declare global {
     namespace Express {

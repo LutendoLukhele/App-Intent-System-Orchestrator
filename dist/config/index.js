@@ -61,7 +61,15 @@ exports.CONFIG = {
     FIREBASE_PRIVATE_KEY: getEnvVar('FIREBASE_PRIVATE_KEY'),
     FIREBASE_CLIENT_EMAIL: getEnvVar('FIREBASE_CLIENT_EMAIL', 'lutendolukheles@gmail.com'),
     FIREBASE_MEASUREMENT_ID: getEnvVar('FIREBASE_MEASUREMENT_ID'),
+    STRIPE_SECRET_KEY_TEST: getEnvVar('STRIPE_SECRET_KEY_TEST', undefined, false),
+    STRIPE_SECRET_KEY_LIVE: getEnvVar('STRIPE_SECRET_KEY_LIVE', undefined, false),
+    STRIPE_PRICE_ID: getEnvVar('STRIPE_PRICE_ID', undefined, false),
+    STRIPE_WEBHOOK_SECRET: getEnvVar('STRIPE_WEBHOOK_SECRET', undefined, false),
+    APP_SUCCESS_URL: getEnvVar('APP_SUCCESS_URL', 'https://yourapp.com/success', false),
+    DATABASE_URL: getEnvVar('DATABASE_URL', undefined, true),
     NODE_ENV: nodeEnv,
+    REVENUECAT_SECRET_KEY: getEnvVar('REVENUECAT_SECRET_KEY', undefined, false),
+    REVENUCAT_API_KEY: getEnvVar('REVENUCAT_API_KEY', undefined, false),
 };
 console.log('[config/index.ts] Final CONFIG object (Firebase relevant parts):');
 console.log(`[config/index.ts]   CONFIG.FIREBASE_PROJECT_ID: '${exports.CONFIG.FIREBASE_PROJECT_ID}'`);

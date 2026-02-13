@@ -1,0 +1,37 @@
+{
+  "name": "@aso/intent-engine",
+  "version": "0.1.0",
+  "description": "Intent resolution and plan compilation engine for ASO",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "keywords": [
+    "aso",
+    "intent",
+    "planning",
+    "orchestration",
+    "llm"
+  ],
+  "author": "ASO Contributors",
+  "license": "MIT",
+  "dependencies": {
+    "@aso/interfaces": "^0.1.0"
+  },
+  "peerDependencies": {
+    "groq-sdk": "^0.19.0",
+    "winston": "^3.11.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

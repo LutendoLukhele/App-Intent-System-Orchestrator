@@ -1,0 +1,32 @@
+{
+  "name": "@aso/observability",
+  "version": "0.1.0",
+  "description": "Production-ready observability stack for ASO and Node.js apps",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "test": "jest"
+  },
+  "keywords": ["aso", "observability", "telemetry", "metrics", "opentelemetry"],
+  "author": "ASO Contributors",
+  "license": "MIT",
+  "peerDependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/sdk-node": "^0.211.0",
+    "express": "^5.0.0",
+    "prom-client": "^15.1.0",
+    "winston": "^3.18.0"
+  },
+  "devDependencies": {
+    "@types/express": "^4.17.0",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

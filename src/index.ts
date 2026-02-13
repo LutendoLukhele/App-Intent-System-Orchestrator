@@ -13,6 +13,47 @@ import { v4 as uuidv4 } from 'uuid';
 import Groq from 'groq-sdk';
 import * as storage from 'node-persist';
 
+// --- Monitoring & Observability ---
+import { initializeTelemetry } from './monitoring/telemetry';
+import { 
+  traceContextMiddleware, 
+  httpLoggingMiddleware, 
+  createStructuredLogger, 
+  logWithContext 
+} from './monitoring/logging';
+import {
+  securityHeadersMiddleware,
+  globalRateLimiter,
+  authRateLimiter,
+  validateTokenExpiry,
+  corsOptionsSecure,
+  secureErrorHandler,
+} from './monitoring/security';
+import { 
+  httpRequestDuration, 
+  httpRequestsTotal, 
+  httpRequestSize, 
+  httpResponseSize,
+  errorCounter,
+  uptime as uptimeMetric
+} from './monitoring/metrics';
+import { createHealthRouter } from './monitoring/health';
+import { CircuitBreaker, withRetry, ErrorType, ErrorSeverity, createAppError } from './monitoring/error-handling';
+import { 
+  setupBootstrapMiddleware, 
+  createStandardRateLimiter,
+  createLLMRateLimiter,
+  createWebhookRateLimiter,
+  circuitBreaker as bootstrapCircuitBreaker 
+} from './middleware/bootstrap-rate-limiting';
+import { bootstrapMonitor } from './monitoring/bootstrap-capacity-monitor';
+
+// Initialize OpenTelemetry
+initializeTelemetry();
+
+// Create structured logger for this service
+const logger = createStructuredLogger('beat-engine-backend');
+
 // --- Core Dependencies & Services ---
 import { CONFIG } from './config';
 import { auth as firebaseAdminAuth } from './firebase';
@@ -58,13 +99,9 @@ import interpretRouter from './routes/interpret';
 import sessionsRouter from './routes/sessions';
 import { HistoryService, HistoryItemType } from './services/HistoryService';
 import historyRouter from './routes/history';
-
-// --- Logger Setup ---
-const logger = winston.createLogger({
-    level: 'info',
-    format: winston.format.combine(winston.format.timestamp(), winston.format.json()),
-    transports: [new winston.transports.Console()],
-});
+import { stripeService } from './services/StripeService';
+import { revenueCatService } from './services/RevenueCatService';
+import { subscriptionService } from './services/SubscriptionService';
 
 // --- Service Initialization ---
 const groqClient = new Groq({ apiKey: CONFIG.GROQ_API_KEY });
@@ -100,6 +137,11 @@ const toolOrchestrator = new ToolOrchestrator({
 const plannerService = new PlannerService(CONFIG.GROQ_API_KEY, CONFIG.MAX_TOKENS, toolConfigManager, providerAwareFilter);
 const beatEngine = new BeatEngine(toolConfigManager);
 const historyService = new HistoryService(redis);
+
+// Initialize circuit breakers for external APIs
+const nangoCircuitBreaker = new CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
+const groqCircuitBreaker = new CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
+const stripeCircuitBreaker = new CircuitBreaker(logger, { failureThreshold: 5, timeout: 60000 });
 
 const conversationService = new ConversationService({
     groqApiKey: CONFIG.GROQ_API_KEY,
@@ -202,10 +244,97 @@ async function streamText(sessionId: string, messageId: string, text: string) {
 // --- WebSocket Server Setup ---
 const app = express();
 
-// --- Middleware Setup ---
-app.use(cors());
+// --- Monitoring Middleware ---
+app.use(traceContextMiddleware);
+app.use(securityHeadersMiddleware());
+app.use(httpLoggingMiddleware(logger));
+app.use(globalRateLimiter);
+app.use(validateTokenExpiry(logger));
+
+// --- Bootstrap Rate Limiting & Capacity Monitoring ---
+setupBootstrapMiddleware(app, redis);
+
+// --- CORS Setup ---
+app.use(cors(corsOptionsSecure()));
+
+// --- Body Parser Middleware ---
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// --- Health Check Routes (before other routes) ---
+const healthChecks = new Map<string, () => Promise<boolean>>();
+healthChecks.set('database', async () => {
+  try {
+    const result = await sql`SELECT 1`;
+    return !!result;
+  } catch (err) {
+    logger.error('Database health check failed', err as Error);
+    return false;
+  }
+});
+
+healthChecks.set('redis', async () => {
+  try {
+    await redis.ping();
+    return true;
+  } catch (err) {
+    logger.error('Redis health check failed', err as Error);
+    return false;
+  }
+});
+
+app.use(createHealthRouter(logger, healthChecks));
+
+// --- Bootstrap Monitoring Endpoints ---
+app.get('/metrics/bootstrap', (req, res) => {
+  try {
+    const metrics = bootstrapMonitor.getMetrics();
+    res.json({ metrics, timestamp: Date.now() });
+  } catch (err) {
+    logger.error('Failed to get bootstrap metrics', err as Error);
+    res.status(500).json({ error: 'Failed to retrieve metrics' });
+  }
+});
+
+app.get('/bootstrap-status', (req, res) => {
+  try {
+    const metrics = bootstrapMonitor.getMetrics();
+    const healthStatus = bootstrapMonitor.getHealthStatus();
+    const scaling = bootstrapMonitor.getScalingRecommendation();
+    res.json({
+      status: healthStatus,
+      metrics,
+      scaling,
+      timestamp: Date.now(),
+      uptime: process.uptime()
+    });
+  } catch (err) {
+    logger.error('Failed to get bootstrap status', err as Error);
+    res.status(500).json({ error: 'Failed to retrieve status' });
+  }
+});
+
+app.get('/health/detailed', (req, res) => {
+  try {
+    const metrics = bootstrapMonitor.getMetrics();
+    const healthStatus = bootstrapMonitor.getHealthStatus();
+    res.json({
+      status: 'healthy',
+      checks: {
+        cpu: { status: metrics.cpu.percent < 85 ? 'ok' : 'warning', value: `${metrics.cpu.percent}%` },
+        memory: { status: metrics.memory.percent < 92 ? 'ok' : 'warning', value: `${metrics.memory.percent}%` },
+        database: { status: 'ok', connections: metrics.database.active_connections },
+        redis: { status: 'ok' },
+        uptime: { value: `${Math.floor(process.uptime())}s` }
+      },
+      metrics,
+      timestamp: Date.now()
+    });
+  } catch (err) {
+    logger.error('Failed to get detailed health', err as Error);
+    res.status(500).json({ error: 'Health check failed' });
+  }
+});
 
 // --- API Routes ---
 app.use('/api/artifacts', artifactsRouter);
@@ -412,6 +541,242 @@ app.post('/api/webhooks/nango', async (req, res) => {
   }
 });
 
+// --- Create Payment Link Endpoint ---
+// Simplified architecture: RevenueCat reads metadata from Stripe subscriptions
+// Flow: Frontend → Backend creates link → Stripe → RevenueCat (direct webhook)
+app.post('/api/create-payment-link', async (req, res) => {
+  try {
+    // Extract Firebase ID token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ 
+        success: false,
+        error: 'Unauthorized - No token provided' 
+      });
+    }
+
+    const idToken = authHeader.split('Bearer ')[1];
+    
+    // Verify the Firebase token
+    const decodedToken = await firebaseAdminAuth.verifyIdToken(idToken);
+    const firebaseUid = decodedToken.uid;
+    const email = decodedToken.email;
+
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email not found in Firebase token'
+      });
+    }
+
+        logger.info('Creating payment link', {
+            firebaseUid,
+            email,
+        });
+
+        // Create Stripe payment link with Firebase UID in metadata
+        // RevenueCat will read revenuecat_user_id from subscription metadata
+        const paymentUrl = await stripeService.createPaymentLinkForUser(
+            firebaseUid,
+            email
+        );
+
+    res.status(200).json({
+      success: true,
+      url: paymentUrl
+    });
+
+  } catch (error: any) {
+    logger.error('Failed to create payment link', {
+      error: error.message,
+      stack: error.stack
+    });
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to create payment link'
+    });
+  }
+});
+
+// ============================================
+// Public Payment Link Endpoint (Landing Page)
+// ============================================
+app.post('/api/create-payment-link-public', async (req, res) => {
+    try {
+        const { email } = req.body;
+        if (!email || !email.includes('@')) {
+            return res.status(400).json({ error: 'Valid email required' });
+        }
+        logger.info(`🌐 Public payment link request for: ${email}`);
+        // Generate a temporary ID for tracking
+        const tempUserId = `temp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        // Create payment link with temporary ID
+        const urlWithEmail = await stripeService.createPaymentLinkWithMetadata(
+            tempUserId,
+            email,
+            'landing_page'
+        );
+        logger.info(`✅ Created public payment link: ${tempUserId}`);
+        res.json({ success: true, url: urlWithEmail });
+    } catch (error: any) {
+        logger.error('Public payment link error', { error: error.message });
+        res.status(500).json({ error: 'Failed to create payment link', details: error.message });
+    }
+});
+
+// ============================================
+// Link Subscription After User Signs In
+// ============================================
+app.post('/api/link-subscription', async (req, res) => {
+    try {
+        const { firebaseUid, email, tempUserId } = req.body;
+        // Verify Firebase token
+        const authHeader = req.headers.authorization;
+        if (!authHeader?.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing authorization token' });
+        }
+        const token = authHeader.split('Bearer ')[1];
+        const decodedToken = await firebaseAdminAuth.verifyIdToken(token);
+        if (decodedToken.uid !== firebaseUid) {
+            return res.status(403).json({ error: 'Unauthorized' });
+        }
+        logger.info(`🔗 Linking subscription for ${email} to ${firebaseUid}`);
+        // Call RevenueCat API to transfer subscription from temp ID to real Firebase UID
+        // This requires RevenueCat's REST API and secret key
+        const revenuecatSecret = process.env.REVENUECAT_SECRET_KEY || process.env.REVENUCAT_API_KEY;
+        if (!revenuecatSecret) {
+            logger.error('REVENUECAT_SECRET_KEY is not set');
+            return res.status(500).json({ error: 'RevenueCat secret key not configured' });
+        }
+        // Transfer all subscriptions from tempUserId to firebaseUid
+        const transferUrl = `https://api.revenuecat.com/v1/subscribers/${tempUserId}/alias`;
+        const transferResp = await fetch(transferUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${revenuecatSecret}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ new_app_user_id: firebaseUid })
+        });
+        if (!transferResp.ok) {
+            const errText = await transferResp.text();
+            logger.error('RevenueCat transfer failed', { status: transferResp.status, errText });
+            return res.status(500).json({ error: 'Failed to link subscription', details: errText });
+        }
+        // Optionally, update email attribute
+        const attrUrl = `https://api.revenuecat.com/v1/subscribers/${firebaseUid}/attributes`;
+        await fetch(attrUrl, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${revenuecatSecret}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ attributes: { email: { value: email } } })
+        });
+        res.json({ success: true });
+    } catch (error: any) {
+        logger.error('Link subscription error', { error: error.message });
+        res.status(500).json({ error: 'Failed to link subscription', details: error.message });
+    }
+});
+
+// --- Success Page Endpoint ---
+app.get('/success', (req, res) => {
+  try {
+    const email = req.query.email ? `?email=${encodeURIComponent(req.query.email as string)}` : '';
+    // Serve the success page - in production, this would be served from a React build
+    // For now, return HTML with embedded React component or redirect to frontend
+    const html = `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Purchase Successful!</title>
+        <link rel="stylesheet" href="/success.css">
+      </head>
+      <body>
+        <div id="root"></div>
+        <script src="/success.js"></script>
+      </body>
+      </html>
+    `;
+    res.setHeader('Content-Type', 'text/html');
+    res.send(html);
+  } catch (error: any) {
+    logger.error('Success page error', { error: error.message });
+    res.status(500).json({ error: 'Failed to load success page' });
+  }
+});
+
+// --- Stripe Webhook Endpoint (Optional - For Audit Logging Only) ---
+// NOTE: In simplified architecture, main webhooks go directly to RevenueCat
+// This endpoint is optional and only for local audit logging if needed
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), async (req, res) => {
+  try {
+    const signature = req.headers['stripe-signature'] as string;
+    const body = typeof req.body === 'string' ? req.body : JSON.stringify(req.body);
+
+    // Verify webhook came from Stripe (optional)
+    const event = stripeService.verifyWebhookSignature(body, signature);
+    if (!event) {
+      logger.warn('Stripe webhook signature verification failed');
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
+    // Log the event for audit purposes
+    logger.info('Stripe webhook received (audit log only)', {
+      eventType: event.type,
+      eventId: event.id,
+      note: 'Main processing happens in RevenueCat'
+    });
+
+    // Return 200 OK immediately
+    res.status(200).json({ received: true });
+
+  } catch (err: any) {
+    logger.error('Stripe webhook error', {
+      error: err.message,
+      stack: err.stack
+    });
+    // Always return 200 to prevent Stripe retries
+    res.status(200).json({ error: 'processed with error' });
+  }
+});
+
+// --- Subscription Info Endpoint (Optional) ---
+// In simplified architecture, frontend should check RevenueCat SDK directly
+// This endpoint is optional and mainly for debugging
+app.get('/api/subscription', async (req, res) => {
+  try {
+    // Extract Firebase token
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      return res.status(401).json({ error: 'Unauthorized - No token provided' });
+    }
+
+    const idToken = authHeader.split('Bearer ')[1];
+    const decodedToken = await firebaseAdminAuth.verifyIdToken(idToken);
+    const firebaseUid = decodedToken.uid;
+
+    // Check RevenueCat for entitlements (source of truth)
+    const isSubscribed = await revenueCatService.isUserSubscribed(firebaseUid);
+    const activeEntitlements = await revenueCatService.getActiveEntitlements(firebaseUid);
+
+    res.json({
+      success: true,
+      isSubscribed,
+      entitlements: activeEntitlements
+    });
+  } catch (err: any) {
+    logger.error('Failed to get subscription info', { error: err.message });
+    res.status(500).json({ 
+      success: false,
+      error: err.message 
+    });
+  }
+});
+
 // --- Debug Endpoint: Force Sync ---
 // Manually trigger a Nango sync for testing
 app.post('/api/debug/force-sync', async (req, res) => {
@@ -447,10 +812,38 @@ app.post('/api/debug/force-sync', async (req, res) => {
   }
 });
 
-// Health check
-app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+// Add HTTP metrics middleware
+app.use((req, res, next) => {
+  const contentLength = parseInt(req.get('content-length') || '0');
+  if (contentLength > 0) {
+    httpRequestSize.observe({ method: req.method, route: req.path }, contentLength);
+  }
+
+  const originalSend = res.send;
+  res.send = function (data) {
+    const responseSize = Buffer.byteLength(JSON.stringify(data));
+    httpResponseSize.observe(
+      { method: req.method, route: req.path, status_code: res.statusCode },
+      responseSize
+    );
+    return originalSend.call(this, data);
+  };
+
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = (Date.now() - start) / 1000;
+    httpRequestDuration.observe(
+      { method: req.method, route: req.path, status_code: res.statusCode },
+      duration
+    );
+    httpRequestsTotal.inc({ method: req.method, route: req.path, status_code: res.statusCode });
+  });
+
+  next();
 });
+
+// Global error handler
+app.use(secureErrorHandler(logger));
 
 const server = createServer(app);
 const wss = new WebSocketServer({ server });
@@ -1803,6 +2196,24 @@ wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
 });
 
 const PORT = process.env.PORT || 8080;
+
+// Resource metrics collection
+setInterval(() => {
+  const memUsage = process.memoryUsage();
+  const { memoryUsageBytes } = require('./monitoring/metrics');
+  
+  if (memoryUsageBytes && typeof memoryUsageBytes.set === 'function') {
+    memoryUsageBytes.set({ type: 'heapUsed' }, memUsage.heapUsed);
+    memoryUsageBytes.set({ type: 'heapTotal' }, memUsage.heapTotal);
+    memoryUsageBytes.set({ type: 'external' }, memUsage.external);
+    memoryUsageBytes.set({ type: 'rss' }, memUsage.rss);
+  }
+
+  if (uptimeMetric && typeof uptimeMetric.set === 'function') {
+    uptimeMetric.set(process.uptime());
+  }
+}, 30000); // Update every 30 seconds
+
 server.listen(PORT, () => console.log(`🚀 Server is listening on port ${PORT}`));
 
 // Graceful shutdown

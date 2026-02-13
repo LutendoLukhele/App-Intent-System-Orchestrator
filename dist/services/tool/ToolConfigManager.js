@@ -202,7 +202,10 @@ class ToolConfigManager {
         const validate = this.ajv.compile(schema);
         const valid = validate(args);
         if (!valid) {
-            const errors = validate.errors?.map(e => `${e.dataPath} ${e.message}`).join(', ') || 'Validation failed';
+            const errors = validate.errors?.map(e => {
+                const path = e.dataPath || e.instancePath || '';
+                return `${path} ${e.message}`;
+            }).join(', ') || 'Validation failed';
             logger.warn('Validation failed', { toolName, args, errors });
             throw new Error(errors);
         }

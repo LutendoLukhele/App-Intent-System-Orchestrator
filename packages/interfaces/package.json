@@ -1,0 +1,28 @@
+{
+  "name": "@aso/interfaces",
+  "version": "0.1.0",
+  "description": "Shared interfaces and types for ASO (App-System-Orchestrator)",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "aso",
+    "interfaces",
+    "orchestration",
+    "intent",
+    "types"
+  ],
+  "author": "ASO Contributors",
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "^5.3.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

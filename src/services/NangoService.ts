@@ -1,10 +1,29 @@
 // src/services/NangoService.ts
+//
+// REFACTORED: Now uses ProviderGateway internally while maintaining
+// backward-compatible API for existing consumers.
+//
+// The gateway pattern enables:
+// - Provider configuration via JSON (no hardcoded switch statements)
+// - Pluggable adapters for different OAuth providers
+// - Unified observability via gateway events
+// - Easy testing via interface mocking
 
 import { Nango } from '@nangohq/node';
 import winston from 'winston';
 import { CONFIG } from '../config';
 import axios from 'axios';
 import { SessionAwareWarmupManager } from './SessionAwareWarmupManager';
+import { 
+  IProviderGateway, 
+  ProviderConfig,
+  FetchOptions 
+} from './interfaces';
+import { 
+  ProviderGateway, 
+  NangoProviderAdapter, 
+  NangoProviderAdapterFactory 
+} from '../adapters';
 
 // Interface definitions remain the same for type safety
 interface NangoResponse {
@@ -13,11 +32,18 @@ interface NangoResponse {
   [key: string]: any;
 }
 
+// Load provider configs
+import providersConfig from '../../config/providers.json';
+
 export class NangoService {
   private nango: Nango;
   private logger: winston.Logger;
   private connectionWarmCache: Map<string, number> = new Map(); // connectionId -> lastWarmedTimestamp
   private warmupManager: SessionAwareWarmupManager;
+  
+  // NEW: Provider gateway for unified operations
+  private gateway: IProviderGateway;
+  private gatewayInitialized: boolean = false;
 
   constructor() {
     if (!CONFIG.NANGO_SECRET_KEY) {
@@ -36,15 +62,75 @@ export class NangoService {
     });
     this.nango = new Nango({ secretKey: CONFIG.NANGO_SECRET_KEY });
     this.warmupManager = new SessionAwareWarmupManager();
-    this.logger.info(`NangoService initialized with SessionAwareWarmupManager.`);
+    
+    // Initialize the gateway with adapters
+    this.gateway = this.initializeGateway();
+    
+    this.logger.info(`NangoService initialized with ProviderGateway (${this.gateway.getRegisteredProviders().length} providers).`);
+  }
+
+  /**
+   * Initialize the ProviderGateway with adapters from providers.json
+   */
+  private initializeGateway(): IProviderGateway {
+    const gateway = new ProviderGateway(
+      { 
+        enableWarmingCache: true,
+        enableMetrics: true,
+        enableEvents: true 
+      },
+      this.logger
+    );
+
+    // Register adapter factory
+    const factory = new NangoProviderAdapterFactory(
+      CONFIG.NANGO_SECRET_KEY!,
+      this.logger
+    );
+    gateway.registerAdapterFactory(factory);
+
+    // Create and register adapters from config
+    const providers = providersConfig.providers as Record<string, ProviderConfig>;
+    for (const [key, config] of Object.entries(providers)) {
+      try {
+        const adapter = new NangoProviderAdapter({
+          secretKey: CONFIG.NANGO_SECRET_KEY!,
+          providerConfig: { ...config, key },
+          logger: this.logger
+        });
+        gateway.registerAdapter(adapter);
+      } catch (err) {
+        this.logger.warn(`Failed to register adapter for ${key}`, { 
+          error: (err as Error).message 
+        });
+      }
+    }
+
+    this.gatewayInitialized = true;
+    return gateway;
+  }
+
+  /**
+   * Get the underlying ProviderGateway for direct access
+   * Useful for new code that wants to use the gateway directly
+   */
+  public getGateway(): IProviderGateway {
+    return this.gateway;
   }
 
   // Connection warming to eliminate cold start penalties
+  // REFACTORED: Now delegates to gateway when possible, with legacy fallback
   public async warmConnection(
     providerConfigKey: string,
     connectionId: string,
     force: boolean = false
   ): Promise<boolean> {
+    // Try gateway first (uses providers.json config, no hardcoded switch)
+    if (this.gatewayInitialized && this.gateway.hasAdapter(providerConfigKey)) {
+      return this.gateway.warmConnection(providerConfigKey, connectionId, force);
+    }
+
+    // Legacy fallback for providers not yet in gateway
     const cacheKey = `${providerConfigKey}:${connectionId}`;
     const lastWarmed = this.connectionWarmCache.get(cacheKey);
     const WARM_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
@@ -59,7 +145,7 @@ export class NangoService {
     try {
       let pingEndpoint: string;
 
-      // Provider-specific lightweight ping endpoints
+      // Provider-specific lightweight ping endpoints (legacy - will be removed once all providers migrated)
       switch (providerConfigKey) {
         case 'gmail':
         case 'google':
@@ -134,10 +220,32 @@ export class NangoService {
     actionName: string, // e.g., 'send-email'
     actionPayload: Record<string, any>
   ): Promise<any> {
-    this.logger.info('Triggering generic Nango action via direct API', { providerConfigKey, actionName });
+    this.logger.info('Triggering generic Nango action', { providerConfigKey, actionName });
 
+    // Try gateway first for registered providers
+    if (this.gatewayInitialized && this.gateway.hasAdapter(providerConfigKey)) {
+      const result = await this.gateway.triggerAction(
+        providerConfigKey,
+        connectionId,
+        actionName,
+        actionPayload
+      );
+      
+      if (result.success) {
+        this.logger.info('Gateway action successful', { actionName });
+        return result.data;
+      } else {
+        const enhancedError: any = new Error(result.error?.message || 'Action failed');
+        enhancedError.nangoErrorDetails = {
+          actionName,
+          ...result.error
+        };
+        throw enhancedError;
+      }
+    }
+
+    // Legacy fallback: direct API call
     try {
-      // FIX: Replaced the Nango SDK call with a direct axios.post call for consistency
       const response = await axios.post(
         'https://api.nango.dev/action/trigger',
         {
