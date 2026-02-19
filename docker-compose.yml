@@ -21,7 +21,7 @@ services:
       STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318/v1/traces
       LOG_LEVEL: ${LOG_LEVEL:-info}
-      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:54059/app,https://app.geniusai.live,https://app.geniusai.live/app}
       # Bootstrap Rate Limiting
       RATE_LIMIT_ENABLED: "true"
       RATE_LIMIT_WINDOW_MS: "60000"
@@ -180,7 +180,7 @@ services:
     image: prom/prometheus:latest
     container_name: beat-engine-prometheus
     volumes:
-      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus_data:/prometheus
     ports:
       - "9091:9090"
@@ -208,6 +208,7 @@ services:
       GF_INSTALL_PLUGINS: "redis-datasource"
     volumes:
       - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
     restart: unless-stopped
     networks:
       - backend-network
@@ -218,6 +219,43 @@ services:
         max-file: "5"
     depends_on:
       - prometheus
+      - jaeger
+
+  # Loki for Log Aggregation
+  loki:
+    image: grafana/loki:latest
+    container_name: beat-engine-loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./monitoring/loki-config.yml:/etc/loki/local-config.yaml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Promtail for Log Shipping
+  promtail:
+    image: grafana/promtail:latest
+    container_name: beat-engine-promtail
+    volumes:
+      - ./monitoring/promtail-config.yml:/etc/promtail/config.yaml:ro
+      - /var/log:/var/log
+    command: -config.file=/etc/promtail/config.yaml
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
 
 volumes:
   postgres_data:
@@ -227,6 +265,8 @@ volumes:
   prometheus_data:
     driver: local
   grafana_data:
+    driver: local
+  loki_data:
     driver: local
 
 networks:
