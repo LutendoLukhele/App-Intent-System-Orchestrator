@@ -1,6 +1,6 @@
 # ASO — App-System-Orchestrator
 
-> Intent orchestration infrastructure. Not an "AI agent" — a system that understands what needs to be done.
+> Intent orchestration infrastructure. Not an "AI agent"  Towards a system that understands what needs to be done.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE.md)
 
@@ -29,7 +29,7 @@ ASO is an **intent-to-action orchestration engine**. It takes requests from mult
 
 ```bash
 # Clone
-git clone https://github.com/YOUR_USERNAME/aso.git
+git clone https://github.com/LutendoLukhele/aso.git
 cd aso
 
 # Install
