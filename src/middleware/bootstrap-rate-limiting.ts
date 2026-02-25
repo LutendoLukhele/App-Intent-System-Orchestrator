@@ -1,4 +1,4 @@
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { Express, Request, Response, NextFunction } from 'express';
 import { Redis } from 'ioredis';
 
@@ -59,7 +59,8 @@ export const createStandardRateLimiter = (redisClient?: Redis) => {
     windowMs: 60 * 1000, // 1 minute
     max: 300, // 300 requests per window
     keyGenerator: (req: Request) => {
-      return (req as any).user?.id || req.ip || 'unknown';
+      // Use authenticated user ID if available, otherwise use IP (with IPv6 support)
+      return (req as any).user?.id || ipKeyGenerator(req) || 'unknown';
     },
     skip: (req: Request) => {
       return req.path === '/health' || req.path === '/health/detailed';
@@ -92,7 +93,7 @@ export const createLLMRateLimiter = (redisClient?: Redis) => {
   const perUserLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutes
     max: parseInt(process.env.LLM_RATE_LIMIT_PER_USER || '10', 10),
-    keyGenerator: (req: Request) => (req as any).user?.id || req.ip || 'unknown',
+    keyGenerator: (req: Request) => (req as any).user?.id || ipKeyGenerator(req) || 'unknown',
     handler: (req: Request, res: Response) => {
       res.status(429).json({
         error: 'LLM rate limit exceeded (per user)',
@@ -119,11 +120,11 @@ export const createWebhookRateLimiter = (redisClient?: Redis) => {
     windowMs: 60 * 1000, // 1 minute
     max: 100,
     keyGenerator: (req: Request) => {
-      // Use X-Webhook-Source header or provider from body
+      // Use X-Webhook-Source header or provider from body, with IPv6 support for IP fallback
       return (
         (req.headers['x-webhook-source'] as string) ||
         ((req.body as any)?.provider as string) ||
-        req.ip ||
+        ipKeyGenerator(req) ||
         'unknown'
       );
     },
