@@ -17,7 +17,8 @@ const logger = winston.createLogger({
 });
 
 export class StripeService {
-  private stripe: Stripe;
+  private stripe: Stripe | null = null;
+  public isEnabled = false;
   private webhookSecret?: string;
 
   constructor() {
@@ -27,13 +28,16 @@ export class StripeService {
       : CONFIG.STRIPE_SECRET_KEY_TEST;
     
     if (!apiKey) {
-      logger.error('CRITICAL: STRIPE_SECRET_KEY environment variable is not set');
-      throw new Error('STRIPE_SECRET_KEY is required');
+      logger.warn('STRIPE_SECRET_KEY not set - Stripe service disabled');
+      this.stripe = null;
+      this.isEnabled = false;
+      return;
     }
 
     this.stripe = new Stripe(apiKey, {
       apiVersion: '2023-10-16',
     });
+    this.isEnabled = true;
 
     this.webhookSecret = CONFIG.STRIPE_WEBHOOK_SECRET;
 
@@ -58,6 +62,9 @@ export class StripeService {
     firebaseUid: string,
     email: string
   ): Promise<string> {
+    if (!this.isEnabled || !this.stripe) {
+      throw new Error('Stripe is not configured');
+    }
     try {
       if (!CONFIG.STRIPE_PRICE_ID) {
         throw new Error('STRIPE_PRICE_ID is not configured');
@@ -117,6 +124,9 @@ export class StripeService {
     rawBody: string | Buffer,
     signature: string
   ): Stripe.Event | null {
+    if (!this.isEnabled || !this.stripe) {
+      return null;
+    }
     if (!this.webhookSecret) {
       logger.warn('Webhook signature verification disabled - STRIPE_WEBHOOK_SECRET not configured');
       // Parse body without verification (not recommended for production)
@@ -146,6 +156,9 @@ export class StripeService {
     email: string,
     source: string = 'landing_page'
   ): Promise<string> {
+    if (!this.isEnabled || !this.stripe) {
+      throw new Error('Stripe is not configured');
+    }
     try {
       if (!CONFIG.STRIPE_PRICE_ID) {
         throw new Error('STRIPE_PRICE_ID is not configured');
@@ -198,6 +211,9 @@ export class StripeService {
    * Get a customer by email (useful for debugging)
    */
   async getCustomerByEmail(email: string): Promise<Stripe.Customer | null> {
+    if (!this.isEnabled || !this.stripe) {
+      return null;
+    }
     try {
       const customers = await this.stripe.customers.list({
         email,
@@ -218,6 +234,9 @@ export class StripeService {
    * Get subscription by ID (useful for debugging)
    */
   async getSubscription(subscriptionId: string): Promise<Stripe.Subscription | null> {
+    if (!this.isEnabled || !this.stripe) {
+      return null;
+    }
     try {
       return await this.stripe.subscriptions.retrieve(subscriptionId);
     } catch (error: any) {
