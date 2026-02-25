@@ -107,7 +107,7 @@ services:
       POSTGRES_USER: ${DB_USER:-beat_user}
       POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_password}
       POSTGRES_DB: ${DB_NAME:-beat_engine}
-      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+      POSTGRES_INITDB_ARGS: "-c shared_preload_libraries=pg_stat_statements"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
@@ -248,6 +248,20 @@ services:
       - ./monitoring/promtail-config.yml:/etc/promtail/config.yaml:ro
       - /var/log:/var/log
     command: -config.file=/etc/promtail/config.yaml
+    restart: unless-stopped
+    networks:
+      - backend-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
+  # Cloudflare Tunnel for public access
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: beat-engine-cloudflared
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN}
     restart: unless-stopped
     networks:
       - backend-network
