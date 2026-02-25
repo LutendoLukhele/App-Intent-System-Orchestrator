@@ -246,16 +246,32 @@ Output ONLY valid JSON with corrected arguments. No explanation.`;
               error: error.message 
             });
             
-            const fixedArguments = await this._fixArgumentsWithLlm(
-              step, 
-              run, 
-              resolvedArgs, 
-              error.message
-            );
+            // Check if LLM fix is disabled via env var
+            const llmFixEnabled = process.env.LLM_ARGUMENT_FIX_ENABLED !== 'false';
+            
+            if (llmFixEnabled) {
+              try {
+                const fixedArguments = await this._fixArgumentsWithLlm(
+                  step, 
+                  run, 
+                  resolvedArgs, 
+                  error.message
+                );
 
-            // Re-validate
-            this.toolConfigManager.validateToolArgsWithZod(step.toolCall.name, fixedArguments);
-            step.toolCall.arguments = fixedArguments;
+                // Re-validate
+                this.toolConfigManager.validateToolArgsWithZod(step.toolCall.name, fixedArguments);
+                step.toolCall.arguments = fixedArguments;
+              } catch (llmFixError: any) {
+                // LLM fix failed - log and continue with original args (will be handled by client)
+                logger.warn('LLM argument fix failed, using original args', { 
+                  stepId: step.stepId,
+                  error: llmFixError.message 
+                });
+                // Don't throw - let the tool execution handle the validation error
+              }
+            } else {
+              logger.info('LLM argument fix disabled, skipping', { stepId: step.stepId });
+            }
           }
 
           // Execute the tool
