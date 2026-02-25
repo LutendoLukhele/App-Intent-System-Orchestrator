@@ -1,6 +1,23 @@
-import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import rateLimit from 'express-rate-limit';
 import { Express, Request, Response, NextFunction } from 'express';
 import { Redis } from 'ioredis';
+
+/**
+ * IPv6-compatible key generator for rate limiting
+ * Handles both IPv4 and IPv6 addresses properly
+ */
+const getIpKey = (req: Request): string => {
+  // Get the IP address, handling proxies
+  const ip = (req as any).ip || 
+             (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim() ||
+             'unknown';
+  
+  // Normalize IPv6 to IPv4 if it's a mapped address
+  if (ip.startsWith('::ffff:')) {
+    return ip.substring(7); // Strip ::ffff: prefix
+  }
+  return ip;
+};
 
 interface CircuitBreakerMetrics {
   isOpen: boolean;
@@ -60,7 +77,7 @@ export const createStandardRateLimiter = (redisClient?: Redis) => {
     max: 300, // 300 requests per window
     keyGenerator: (req: Request) => {
       // Use authenticated user ID if available, otherwise use IP (with IPv6 support)
-      return (req as any).user?.id || ipKeyGenerator(req) || 'unknown';
+      return (req as any).user?.id || getIpKey(req) || 'unknown';
     },
     skip: (req: Request) => {
       return req.path === '/health' || req.path === '/health/detailed';
@@ -93,7 +110,7 @@ export const createLLMRateLimiter = (redisClient?: Redis) => {
   const perUserLimiter = rateLimit({
     windowMs: 5 * 60 * 1000, // 5 minutes
     max: parseInt(process.env.LLM_RATE_LIMIT_PER_USER || '10', 10),
-    keyGenerator: (req: Request) => (req as any).user?.id || ipKeyGenerator(req) || 'unknown',
+    keyGenerator: (req: Request) => (req as any).user?.id || getIpKey(req) || 'unknown',
     handler: (req: Request, res: Response) => {
       res.status(429).json({
         error: 'LLM rate limit exceeded (per user)',
@@ -124,7 +141,7 @@ export const createWebhookRateLimiter = (redisClient?: Redis) => {
       return (
         (req.headers['x-webhook-source'] as string) ||
         ((req.body as any)?.provider as string) ||
-        ipKeyGenerator(req) ||
+        getIpKey(req) ||
         'unknown'
       );
     },
