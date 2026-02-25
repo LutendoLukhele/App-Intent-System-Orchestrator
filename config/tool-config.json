@@ -55,56 +55,50 @@
               },
               "backfillPeriodMs": {
                 "type": "integer",
-                "description": "Optional: How far back in time to search for emails, specified in milliseconds.",
-                "optional": true
+                "description": "Optional: How far back in time to search for emails, specified in milliseconds."
               },
               "filters": {
                 "type": "object",
                 "description": "Optional: A set of criteria to filter the emails.",
-                "optional": true,
                 "properties": {
                   "sender": {
                     "type": "string",
-                    "description": "Filter by the sender's email address.",
-                    "optional": true
+                    "description": "Filter by the sender's email address."
                   },
                   "recipient": {
                     "type": "string",
-                    "description": "Filter by the recipient's email address.",
-                    "optional": true
+                    "description": "Filter by the recipient's email address."
                   },
                   "subject": {
                     "type": "object",
                     "description": "Filter by keywords or phrases in the email subject.",
-                    "optional": true,
                     "properties": {
-                      "contains": { "type": "array", "items": { "type": "string" }, "optional": true, "description": "Subject must contain ALL these keywords." },
-                      "startsWith": { "type": "string", "optional": true, "description": "Subject must start with this text." },
-                      "endsWith": { "type": "string", "optional": true, "description": "Subject must end with this text." },
-                      "exact": { "type": "string", "optional": true, "description": "Subject must match exactly." }
+                      "contains": { "type": "array", "items": { "type": "string" }, "description": "Subject must contain ALL these keywords." },
+                      "startsWith": { "type": "string", "description": "Subject must start with this text." },
+                      "endsWith": { "type": "string", "description": "Subject must end with this text." },
+                      "exact": { "type": "string", "description": "Subject must match exactly." }
                     }
                   },
                   "dateRange": {
                     "type": "object",
                     "description": "Filter emails received within a specific date range.",
-                    "optional": true,
                     "properties": {
-                      "after": { "type": "string", "format": "date-time", "optional": true, "description": "Include emails received after this ISO 8601 timestamp." },
-                      "before": { "type": "string", "format": "date-time", "optional": true, "description": "Include emails received before this ISO 8601 timestamp." }
+                      "after": { "type": "string", "format": "date-time", "description": "Include emails received after this ISO 8601 timestamp." },
+                      "before": { "type": "string", "format": "date-time", "description": "Include emails received before this ISO 8601 timestamp." }
                     }
                   },
-                  "hasAttachment": { "type": "boolean", "optional": true, "description": "Filter for emails that have attachments." },
-                  "labels": { "type": "array", "items": { "type": "string" }, "optional": true, "description": "Filter by Gmail labels (e.g., INBOX, IMPORTANT, or custom labels)." },
-                  "includeBody": { "type": "boolean", "optional": true, "description": "Whether to include the full email body in the result (can be large). Defaults to false." },
-                  "excludeCategories": { "type": "array", "items": { "type": "string" }, "optional": true, "description": "Gmail categories to exclude (e.g., Promotions, Social, Updates)." },
-                  "isRead": { "type": "boolean", "optional": true, "description": "Filter based on read/unread status (true for read, false for unread)." },
-                  "isImportant": { "type": "boolean", "optional": true, "description": "Filter for emails marked as important by Gmail." },
-                  "includeSpam": { "type": "boolean", "optional": true, "description": "Whether to include emails from the Spam folder. Defaults to false." },
-                  "includeTrash": { "type": "boolean", "optional": true, "description": "Whether to include emails from the Trash folder. Defaults to false." },
-                  "semanticType": { "type": "string", "enum": ["security", "billing", "calendar", "support", "promotion", "general"], "optional": true, "description": "Filter by automatically detected email intent type. Use 'security' for alerts, 'billing' for invoices/payments, 'calendar' for meeting invites, 'support' for help tickets, 'promotion' for marketing emails." },
-                  "minConfidence": { "type": "number", "minimum": 0, "maximum": 1, "optional": true, "description": "Minimum semantic classification confidence (0.0-1.0). Use with semanticType to filter only high-confidence matches. Example: 0.8 for high confidence." },
-                  "limit": { "type": "integer", "description": "Maximum number of emails to return (default/max may vary).", "optional": true },
-                  "offset": { "type": "integer", "description": "Number of emails to skip (for pagination).", "optional": true }
+                  "hasAttachment": { "type": "boolean", "description": "Filter for emails that have attachments." },
+                  "labels": { "type": "array", "items": { "type": "string" }, "description": "Filter by Gmail labels (e.g., INBOX, IMPORTANT, or custom labels)." },
+                  "includeBody": { "type": "boolean", "description": "Whether to include the full email body in the result (can be large). Defaults to false." },
+                  "excludeCategories": { "type": "array", "items": { "type": "string" }, "description": "Gmail categories to exclude (e.g., Promotions, Social, Updates)." },
+                  "isRead": { "type": "boolean", "description": "Filter based on read/unread status (true for read, false for unread)." },
+                  "isImportant": { "type": "boolean", "description": "Filter for emails marked as important by Gmail." },
+                  "includeSpam": { "type": "boolean", "description": "Whether to include emails from the Spam folder. Defaults to false." },
+                  "includeTrash": { "type": "boolean", "description": "Whether to include emails from the Trash folder. Defaults to false." },
+                  "semanticType": { "type": "string", "enum": ["security", "billing", "calendar", "support", "promotion", "general"], "description": "Filter by automatically detected email intent type. Use 'security' for alerts, 'billing' for invoices/payments, 'calendar' for meeting invites, 'support' for help tickets, 'promotion' for marketing emails." },
+                  "minConfidence": { "type": "number", "minimum": 0, "maximum": 1, "description": "Minimum semantic classification confidence (0.0-1.0). Use with semanticType to filter only high-confidence matches. Example: 0.8 for high confidence." },
+                  "limit": { "type": "integer", "description": "Maximum number of emails to return (default/max may vary)." },
+                  "offset": { "type": "integer", "description": "Number of emails to skip (for pagination)." }
                 }
               }
             },
@@ -158,35 +152,29 @@
               "calendarId": {
                 "type": "string",
                 "description": "The ID of the calendar. Defaults to 'primary'.",
-                "optional": true,
                 "default": "primary"
               },
               "eventId": {
                 "type": "string",
-                "description": "Required for operation 'fetch': The ID of the specific event to retrieve.",
-                "optional": true
+                "description": "Required for operation 'fetch': The ID of the specific event to retrieve."
               },
               "filters": {
                 "type": "object",
                 "description": "Optional filters for operation 'fetch_list' to query multiple events.",
-                "optional": true,
                 "properties": {
                   "dateRange": {
                     "type": "object",
                     "description": "Filter events by time range.",
-                    "optional": true,
                     "properties": {
                       "timeMin": {
                         "type": "string",
                         "format": "date-time",
-                        "description": "Start of time range (RFC3339 format, e.g., '2024-11-01T00:00:00Z').",
-                        "optional": true
+                        "description": "Start of time range (RFC3339 format, e.g., '2024-11-01T00:00:00Z')."
                       },
                       "timeMax": {
                         "type": "string",
                         "format": "date-time",
-                        "description": "End of time range (RFC3339 format, e.g., '2024-11-30T23:59:59Z').",
-                        "optional": true
+                        "description": "End of time range (RFC3339 format, e.g., '2024-11-30T23:59:59Z')."
                       }
                     }
                   },
@@ -212,46 +200,38 @@
                       },
                       "required": ["field", "operator", "value"]
                     },
-                    "description": "Additional filter conditions on event fields.",
-                    "optional": true
+                    "description": "Additional filter conditions on event fields."
                   },
                   "showDeleted": {
                     "type": "boolean",
-                    "description": "Include deleted events? Defaults to false.",
-                    "optional": true
+                    "description": "Include deleted events? Defaults to false."
                   },
                   "singleEvents": {
                     "type": "boolean",
                     "description": "Expand recurring events into instances? Defaults to true.",
-                    "optional": true,
                     "default": true
                   },
                   "orderBy": {
                     "type": "string",
                     "enum": ["startTime", "updated"],
-                    "description": "Sort results by start time or last updated. Requires singleEvents=true for 'startTime'.",
-                    "optional": true
+                    "description": "Sort results by start time or last updated. Requires singleEvents=true for 'startTime'."
                   },
                   "limit": {
                     "type": "integer",
-                    "description": "Maximum number of events to return (max 2500).",
-                    "optional": true
+                    "description": "Maximum number of events to return (max 2500)."
                   },
                   "q": {
                     "type": "string",
-                    "description": "Free text search query to find events.",
-                    "optional": true
+                    "description": "Free text search query to find events."
                   },
                   "iCalUID": {
                     "type": "string",
-                    "description": "Filter by specific iCalendar UID.",
-                    "optional": true
+                    "description": "Filter by specific iCalendar UID."
                   },
                   "updatedMin": {
                     "type": "string",
                     "format": "date-time",
-                    "description": "Filter events modified after this timestamp.",
-                    "optional": true
+                    "description": "Filter events modified after this timestamp."
                   }
                 }
               },
@@ -259,7 +239,6 @@
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format: 'detailed' (normalized), 'simple' (minimal), or 'raw' (API response).",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -289,13 +268,11 @@
               "calendarId": {
                 "type": "string",
                 "description": "The ID of the calendar. Defaults to 'primary'.",
-                "optional": true,
                 "default": "primary"
               },
               "event": {
                 "type": "object",
                 "description": "Event details for operation 'create'.",
-                "optional": true,
                 "properties": {
                   "summary": {
                     "type": "string",
@@ -303,13 +280,11 @@
                   },
                   "description": {
                     "type": "string",
-                    "description": "Detailed description of the event.",
-                    "optional": true
+                    "description": "Detailed description of the event."
                   },
                   "location": {
                     "type": "string",
-                    "description": "Physical or virtual location of the event.",
-                    "optional": true
+                    "description": "Physical or virtual location of the event."
                   },
                   "start": {
                     "type": "object",
@@ -318,18 +293,15 @@
                       "dateTime": {
                         "type": "string",
                         "format": "date-time",
-                        "description": "For timed events (RFC3339 format, e.g., '2024-11-20T10:00:00-08:00').",
-                        "optional": true
+                        "description": "For timed events (RFC3339 format, e.g., '2024-11-20T10:00:00-08:00')."
                       },
                       "date": {
                         "type": "string",
-                        "description": "For all-day events (YYYY-MM-DD format).",
-                        "optional": true
+                        "description": "For all-day events (YYYY-MM-DD format)."
                       },
                       "timeZone": {
                         "type": "string",
-                        "description": "Time zone (e.g., 'America/Los_Angeles').",
-                        "optional": true
+                        "description": "Time zone (e.g., 'America/Los_Angeles')."
                       }
                     }
                   },
@@ -340,18 +312,15 @@
                       "dateTime": {
                         "type": "string",
                         "format": "date-time",
-                        "description": "For timed events.",
-                        "optional": true
+                        "description": "For timed events."
                       },
                       "date": {
                         "type": "string",
-                        "description": "For all-day events.",
-                        "optional": true
+                        "description": "For all-day events."
                       },
                       "timeZone": {
                         "type": "string",
-                        "description": "Time zone.",
-                        "optional": true
+                        "description": "Time zone."
                       }
                     }
                   },
@@ -361,23 +330,20 @@
                       "type": "object",
                       "properties": {
                         "email": { "type": "string", "description": "Attendee email address." },
-                        "displayName": { "type": "string", "optional": true },
-                        "optional": { "type": "boolean", "optional": true, "description": "Is this attendee optional?" }
+                        "displayName": { "type": "string" },
+                        "optional": { "type": "boolean", "description": "Is this attendee optional?" }
                       },
                       "required": ["email"]
                     },
-                    "description": "List of event attendees.",
-                    "optional": true
+                    "description": "List of event attendees."
                   },
                   "reminders": {
                     "type": "object",
                     "description": "Event reminders configuration.",
-                    "optional": true,
                     "properties": {
                       "useDefault": {
                         "type": "boolean",
-                        "description": "Use calendar default reminders?",
-                        "optional": true
+                        "description": "Use calendar default reminders?"
                       },
                       "overrides": {
                         "type": "array",
@@ -388,21 +354,18 @@
                             "minutes": { "type": "integer", "description": "Minutes before event." }
                           },
                           "required": ["method", "minutes"]
-                        },
-                        "optional": true
+                        }
                       }
                     }
                   },
                   "recurrence": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "description": "Recurrence rules in RRULE format (e.g., ['RRULE:FREQ=WEEKLY;COUNT=10']).",
-                    "optional": true
+                    "description": "Recurrence rules in RRULE format (e.g., ['RRULE:FREQ=WEEKLY;COUNT=10'])."
                   },
                   "conferenceData": {
                     "type": "object",
                     "description": "Conference/meeting link configuration (e.g., Google Meet).",
-                    "optional": true,
                     "properties": {
                       "createRequest": {
                         "type": "object",
@@ -420,14 +383,12 @@
                   },
                   "visibility": {
                     "type": "string",
-                    "enum": ["default", "public", "private", "confidential"],
-                    "optional": true
+                    "enum": ["default", "public", "private", "confidential"]
                   },
                   "transparency": {
                     "type": "string",
                     "enum": ["opaque", "transparent"],
-                    "description": "'opaque' = busy, 'transparent' = free.",
-                    "optional": true
+                    "description": "'opaque' = busy, 'transparent' = free."
                   }
                 },
                 "required": ["summary", "start", "end"]
@@ -438,21 +399,18 @@
                   "type": "object",
                   "description": "Event object (same structure as 'event' above)."
                 },
-                "description": "Array of events for operation 'batch_create' (max 50).",
-                "optional": true
+                "description": "Array of events for operation 'batch_create' (max 50)."
               },
               "sendUpdates": {
                 "type": "string",
                 "enum": ["all", "externalOnly", "none"],
                 "description": "Send calendar invitations to attendees? Defaults to 'none'.",
-                "optional": true,
                 "default": "none"
               },
               "conferenceDataVersion": {
                 "type": "integer",
                 "enum": [0, 1],
-                "description": "Set to 1 to enable conference data creation.",
-                "optional": true
+                "description": "Set to 1 to enable conference data creation."
               }
             },
             "required": ["operation"]
@@ -481,46 +439,40 @@
               "calendarId": {
                 "type": "string",
                 "description": "The ID of the calendar. Defaults to 'primary'.",
-                "optional": true,
                 "default": "primary"
               },
               "eventId": {
                 "type": "string",
-                "description": "Required for 'update': The ID of the event to update.",
-                "optional": true
+                "description": "Required for 'update': The ID of the event to update."
               },
               "fields": {
                 "type": "object",
                 "description": "Fields to update for operation 'update'. Only provided fields will be changed.",
-                "optional": true,
                 "properties": {
-                  "summary": { "type": "string", "optional": true },
-                  "description": { "type": "string", "optional": true },
-                  "location": { "type": "string", "optional": true },
+                  "summary": { "type": "string" },
+                  "description": { "type": "string" },
+                  "location": { "type": "string" },
                   "start": {
                     "type": "object",
-                    "optional": true,
                     "properties": {
-                      "dateTime": { "type": "string", "format": "date-time", "optional": true },
-                      "date": { "type": "string", "optional": true },
-                      "timeZone": { "type": "string", "optional": true }
+                      "dateTime": { "type": "string", "format": "date-time" },
+                      "date": { "type": "string" },
+                      "timeZone": { "type": "string" }
                     }
                   },
                   "end": {
                     "type": "object",
-                    "optional": true,
                     "properties": {
-                      "dateTime": { "type": "string", "format": "date-time", "optional": true },
-                      "date": { "type": "string", "optional": true },
-                      "timeZone": { "type": "string", "optional": true }
+                      "dateTime": { "type": "string", "format": "date-time" },
+                      "date": { "type": "string" },
+                      "timeZone": { "type": "string" }
                     }
                   },
-                  "attendees": { "type": "array", "optional": true },
-                  "reminders": { "type": "object", "optional": true },
+                  "attendees": { "type": "array" },
+                  "reminders": { "type": "object" },
                   "status": {
                     "type": "string",
-                    "enum": ["confirmed", "tentative", "cancelled"],
-                    "optional": true
+                    "enum": ["confirmed", "tentative", "cancelled"]
                   }
                 }
               },
@@ -534,14 +486,12 @@
                   },
                   "required": ["eventId", "fields"]
                 },
-                "description": "Array of updates for operation 'batch_update' (max 50).",
-                "optional": true
+                "description": "Array of updates for operation 'batch_update' (max 50)."
               },
               "sendUpdates": {
                 "type": "string",
                 "enum": ["all", "externalOnly", "none"],
                 "description": "Notify attendees of changes? Defaults to 'none'.",
-                "optional": true,
                 "default": "none"
               }
             },
@@ -572,23 +522,19 @@
               "entityType": {
                 "type": "string",
                 "enum": ["Page", "DatabaseRow"],
-                "description": "Type of entity to fetch.",
-                "optional": true
+                "description": "Type of entity to fetch."
               },
               "identifier": {
                 "type": "string",
-                "description": "Required for 'fetch': The page ID (UUID format).",
-                "optional": true
+                "description": "Required for 'fetch': The page ID (UUID format)."
               },
               "databaseId": {
                 "type": "string",
-                "description": "Required for 'fetch_database': The database ID (UUID format).",
-                "optional": true
+                "description": "Required for 'fetch_database': The database ID (UUID format)."
               },
               "filters": {
                 "type": "object",
                 "description": "Filters for operation 'fetch_database'.",
-                "optional": true,
                 "properties": {
                   "conditions": {
                     "type": "array",
@@ -610,31 +556,27 @@
                           "description": "Filter operator."
                         },
                         "value": {
-                          "description": "Value to filter by.",
-                          "optional": true
+                          "description": "Value to filter by."
                         }
                       },
                       "required": ["property", "operator"]
                     },
-                    "description": "List of filter conditions.",
-                    "optional": true
+                    "description": "List of filter conditions."
                   },
                   "logic": {
                     "type": "string",
                     "enum": ["and", "or"],
-                    "description": "Logical operator for combining conditions.",
-                    "optional": true
+                    "description": "Logical operator for combining conditions."
                   },
                   "sorts": {
                     "type": "array",
                     "items": {
                       "type": "object",
                       "properties": {
-                        "property": { "type": "string", "optional": true },
+                        "property": { "type": "string" },
                         "timestamp": {
                           "type": "string",
-                          "enum": ["created_time", "last_edited_time"],
-                          "optional": true
+                          "enum": ["created_time", "last_edited_time"]
                         },
                         "direction": {
                           "type": "string",
@@ -643,18 +585,15 @@
                       },
                       "required": ["direction"]
                     },
-                    "description": "Sorting configuration.",
-                    "optional": true
+                    "description": "Sorting configuration."
                   },
                   "limit": {
                     "type": "integer",
-                    "description": "Maximum number of results (max 100).",
-                    "optional": true
+                    "description": "Maximum number of results (max 100)."
                   },
                   "includeArchived": {
                     "type": "boolean",
-                    "description": "Include archived pages?",
-                    "optional": true
+                    "description": "Include archived pages?"
                   }
                 }
               },
@@ -662,7 +601,6 @@
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format. Defaults to 'detailed'.",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -692,22 +630,20 @@
               "parent": {
                 "type": "object",
                 "description": "Parent location for operation 'create'.",
-                "optional": true,
                 "properties": {
                   "type": {
                     "type": "string",
                     "enum": ["database_id", "page_id", "workspace"]
                   },
-                  "database_id": { "type": "string", "optional": true },
-                  "page_id": { "type": "string", "optional": true },
-                  "workspace": { "type": "boolean", "optional": true }
+                  "database_id": { "type": "string" },
+                  "page_id": { "type": "string" },
+                  "workspace": { "type": "boolean" }
                 },
                 "required": ["type"]
               },
               "properties": {
                 "type": "object",
-                "description": "Page properties (key-value pairs). Values can be strings, numbers, booleans, or Notion property objects.",
-                "optional": true
+                "description": "Page properties (key-value pairs). Values can be strings, numbers, booleans, or Notion property objects."
               },
               "children": {
                 "type": "array",
@@ -715,26 +651,23 @@
                   "type": "object",
                   "description": "Block objects for page content."
                 },
-                "description": "Content blocks to add to the page.",
-                "optional": true
+                "description": "Content blocks to add to the page."
               },
               "icon": {
                 "type": "object",
                 "description": "Page icon (emoji or image).",
-                "optional": true,
                 "properties": {
                   "type": { "type": "string", "enum": ["emoji", "external", "file"] },
-                  "emoji": { "type": "string", "optional": true },
-                  "external": { "type": "object", "optional": true, "properties": { "url": { "type": "string" } } }
+                  "emoji": { "type": "string" },
+                  "external": { "type": "object", "properties": { "url": { "type": "string" } } }
                 }
               },
               "cover": {
                 "type": "object",
                 "description": "Page cover image.",
-                "optional": true,
                 "properties": {
                   "type": { "type": "string", "enum": ["external", "file"] },
-                  "external": { "type": "object", "optional": true, "properties": { "url": { "type": "string" } } }
+                  "external": { "type": "object", "properties": { "url": { "type": "string" } } }
                 }
               },
               "pages": {
@@ -743,8 +676,7 @@
                   "type": "object",
                   "description": "Page object (same structure as single create)."
                 },
-                "description": "Array of pages for 'batch_create' (max 100).",
-                "optional": true
+                "description": "Array of pages for 'batch_create' (max 100)."
               }
             },
             "required": ["operation"]
@@ -772,36 +704,31 @@
               },
               "pageId": {
                 "type": "string",
-                "description": "Required for 'update': The page ID to update.",
-                "optional": true
+                "description": "Required for 'update': The page ID to update."
               },
               "properties": {
                 "type": "object",
-                "description": "Properties to update (only specified properties will change).",
-                "optional": true
+                "description": "Properties to update (only specified properties will change)."
               },
               "archived": {
                 "type": "boolean",
-                "description": "Archive (true) or restore (false) the page.",
-                "optional": true
+                "description": "Archive (true) or restore (false) the page."
               },
               "icon": {
                 "type": "object",
                 "description": "Update page icon.",
-                "optional": true,
                 "properties": {
                   "type": { "type": "string", "enum": ["emoji", "external", "file"] },
-                  "emoji": { "type": "string", "optional": true },
-                  "external": { "type": "object", "optional": true }
+                  "emoji": { "type": "string" },
+                  "external": { "type": "object" }
                 }
               },
               "cover": {
                 "type": "object",
                 "description": "Update page cover.",
-                "optional": true,
                 "properties": {
                   "type": { "type": "string", "enum": ["external", "file"] },
-                  "external": { "type": "object", "optional": true }
+                  "external": { "type": "object" }
                 }
               },
               "updates": {
@@ -810,15 +737,14 @@
                   "type": "object",
                   "properties": {
                     "pageId": { "type": "string" },
-                    "properties": { "type": "object", "optional": true },
-                    "archived": { "type": "boolean", "optional": true },
-                    "icon": { "type": "object", "optional": true },
-                    "cover": { "type": "object", "optional": true }
+                    "properties": { "type": "object" },
+                    "archived": { "type": "boolean" },
+                    "icon": { "type": "object" },
+                    "cover": { "type": "object" }
                   },
                   "required": ["pageId"]
                 },
-                "description": "Array of updates for 'batch_update' (max 100).",
-                "optional": true
+                "description": "Array of updates for 'batch_update' (max 100)."
               }
             },
             "required": ["operation"]
@@ -851,18 +777,15 @@
               },
               "identifier": {
                 "type": "string",
-                "description": "Optional: The specific ID or unique field value (like Name or Email based on entityType) to fetch a single record. Use 'all' to fetch multiple records (requires filters or uses defaults).",
-                "optional": true
+                "description": "Optional: The specific ID or unique field value (like Name or Email based on entityType) to fetch a single record. Use 'all' to fetch multiple records (requires filters or uses defaults)."
               },
               "identifierType": {
                 "type": "string",
-                "description": "Optional: Specifies which field the 'identifier' value refers to (e.g., 'Id', 'Name', 'Email'). Only needed if 'identifier' is provided and isn't an Id or 'all'.",
-                "optional": true
+                "description": "Optional: Specifies which field the 'identifier' value refers to (e.g., 'Id', 'Name', 'Email'). Only needed if 'identifier' is provided and isn't an Id or 'all'."
               },
               "filters": {
                 "type": "object",
                 "description": "Optional: Advanced criteria for filtering records when fetching multiple. Required if 'identifier' is 'all' or omitted. Supports conditions, sorting, pagination, aggregation, and field selection.",
-                "optional": true,
                 "properties": {
                   "conditions": {
                     "type": "array",
@@ -895,7 +818,6 @@
                   },
                   "logic": {
                     "type": "string",
-                    "optional": true,
                     "description": "Logical combination of conditions (e.g., '1 AND (2 OR 3)'). Defaults to AND if multiple conditions exist."
                   },
                   "orderBy": {
@@ -908,40 +830,33 @@
                       },
                       "required": ["field"]
                     },
-                    "optional": true,
                     "description": "Sorting criteria for results."
                   },
                   "limit": {
                     "type": "number",
-                    "optional": true,
                     "description": "Maximum number of records to return. Defaults usually apply (typically 200-2000)."
                   },
                   "offset": {
                     "type": "number",
-                    "optional": true,
                     "description": "Number of records to skip (pagination offset)."
                   },
                   "includeFields": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "optional": true,
                     "description": "Specific Salesforce API field names to return. If omitted, default fields are returned."
                   },
                   "excludeFields": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "optional": true,
                     "description": "Specific Salesforce API field names to exclude from results."
                   },
                   "timeFrame": {
                     "type": "string",
-                    "optional": true,
                     "description": "Predefined time frame for date filtering (e.g., 'last7days', 'thisMonth', 'lastYear')."
                   },
                   "groupBy": {
                     "type": "array",
                     "items": { "type": "string" },
-                    "optional": true,
                     "description": "Fields for grouping results (used with aggregate functions)."
                   },
                   "aggregate": {
@@ -955,12 +870,10 @@
                       },
                       "required": ["function", "field"]
                     },
-                    "optional": true,
                     "description": "Aggregation functions for statistical queries (e.g., COUNT, SUM, AVG)."
                   },
                   "includeDeleted": {
                     "type": "boolean",
-                    "optional": true,
                     "description": "Include deleted/archived records in results? Defaults to false."
                   }
                 }
@@ -968,14 +881,12 @@
               "fields": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Optional: Specific Salesforce API field names to include in the results (alternative to 'filters.includeFields').",
-                "optional": true
+                "description": "Optional: Specific Salesforce API field names to include in the results (alternative to 'filters.includeFields')."
               },
               "format": {
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format: 'detailed' (normalized with metadata), 'simple' (minimal data), 'raw' (full Salesforce API response). Defaults to 'detailed'.",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -1010,13 +921,11 @@
               "fields": {
                 "type": "object",
                 "description": "SINGLE RECORD: Use this for creating ONE record. Key-value pairs of Salesforce API field names (e.g., FirstName, LastName, Email, Company, Phone, Title, Status, Rating). Either 'fields' or 'record', not both.",
-                "optional": true,
                 "additionalProperties": true
               },
               "record": {
                 "type": "object",
                 "description": "SINGLE RECORD: Alias for 'fields'. Use this for creating ONE record. Either 'fields' or 'record', not both.",
-                "optional": true,
                 "additionalProperties": true
               },
               "records": {
@@ -1026,24 +935,20 @@
                   "additionalProperties": true,
                   "description": "Record object with Salesforce field names and values."
                 },
-                "description": "BATCH MODE: Use this for creating MULTIPLE records at once (max 100). Array of record objects, each with Salesforce field names. Mutually exclusive with 'fields'/'record'.",
-                "optional": true
+                "description": "BATCH MODE: Use this for creating MULTIPLE records at once (max 100). Array of record objects, each with Salesforce field names. Mutually exclusive with 'fields'/'record'."
               },
               "parentId": {
                 "type": "string",
-                "description": "Optional parent record ID for creating child records or related entities (e.g., AccountId for creating a Contact under an Account).",
-                "optional": true
+                "description": "Optional parent record ID for creating child records or related entities (e.g., AccountId for creating a Contact under an Account)."
               },
               "idempotencyKey": {
                 "type": "string",
-                "description": "Optional unique key for this request to prevent duplicate creation. Use consistent format: e.g., 'contact-john-doe-2025-11-20' or 'lead-acme-corp-2025-11-20'.",
-                "optional": true
+                "description": "Optional unique key for this request to prevent duplicate creation. Use consistent format: e.g., 'contact-john-doe-2025-11-20' or 'lead-acme-corp-2025-11-20'."
               },
               "format": {
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format: 'detailed' (with warnings and metadata), 'simple' (just success/id), 'raw' (full API response). Defaults to 'detailed'.",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -1077,26 +982,22 @@
               },
               "identifier": {
                 "type": "string",
-                "optional": true,
                 "description": "Use for a SINGLE record update. The value used to find the record (e.g., a record ID, Name, or Email)."
               },
               "identifierType": {
                 "type": "string",
                 "enum": ["Id", "Name", "Email", "ExternalId"],
-                "optional": true,
                 "description": "The type of field the 'identifier' refers to. Defaults to 'Id' if not provided."
               },
               "fields": {
                 "type": "object",
                 "minProperties": 1,
                 "description": "Use for a SINGLE record update. Key-value pairs of Salesforce API field names and their new values. Only provided fields will be updated.",
-                "optional": true,
                 "additionalProperties": true
               },
               "record": {
                 "type": "object",
                 "description": "Alias for 'fields'. Use for a SINGLE record update. Key-value pairs of Salesforce API field names and their new values.",
-                "optional": true,
                 "additionalProperties": true
               },
               "records": {
@@ -1111,7 +1012,6 @@
                     "identifierType": {
                       "type": "string",
                       "enum": ["Id", "Name", "Email", "ExternalId"],
-                      "optional": true,
                       "description": "The type of field the 'identifier' refers to. Defaults to 'Id'."
                     },
                     "fields": {
@@ -1121,25 +1021,21 @@
                     },
                     "idempotencyKey": {
                       "type": "string",
-                      "optional": true,
                       "description": "Optional unique key for this specific update to prevent duplicate operations."
                     }
                   },
                   "required": ["identifier", "fields"]
                 },
-                "description": "Use for a BATCH update (max 100 records). An array of objects, each with an 'identifier', 'fields', and optional 'identifierType' and 'idempotencyKey'.",
-                "optional": true
+                "description": "Use for a BATCH update (max 100 records). An array of objects, each with an 'identifier', 'fields', and optional 'identifierType' and 'idempotencyKey'."
               },
               "idempotencyKey": {
                 "type": "string",
-                "description": "Optional unique key for this request to prevent duplicate updates. Use consistent format: e.g., 'update-contact-123-2025-11-20' or 'update-lead-acme-2025-11-20'.",
-                "optional": true
+                "description": "Optional unique key for this request to prevent duplicate updates. Use consistent format: e.g., 'update-contact-123-2025-11-20' or 'update-lead-acme-2025-11-20'."
               },
               "format": {
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format: 'detailed' (with warnings and metadata), 'simple' (just success status), 'raw' (full Salesforce API response). Defaults to 'detailed'.",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -1174,19 +1070,16 @@
               "record": {
                 "type": "object",
                 "description": "Entity fields. Aliases: 'record' or 'fields'. Field names match Microsoft Graph API names (e.g., subject, body, toRecipients, start, end, displayName, emailAddresses, etc.).",
-                "optional": true,
                 "additionalProperties": true
               },
               "fields": {
                 "type": "object",
                 "description": "Alias for 'record'. Key-value pairs of entity properties.",
-                "optional": true,
                 "additionalProperties": true
               },
               "parentId": {
                 "type": "string",
-                "description": "Optional parent record ID (e.g., folder ID for Message, calendar ID for Event, contact folder ID for Contact).",
-                "optional": true
+                "description": "Optional parent record ID (e.g., folder ID for Message, calendar ID for Event, contact folder ID for Contact)."
               }
             },
             "required": ["operation", "entityType"]
@@ -1224,13 +1117,11 @@
               "patch": {
                 "type": "object",
                 "description": "Fields to update. Only provided fields will be changed.",
-                "optional": true,
                 "additionalProperties": true
               },
               "fields": {
                 "type": "object",
                 "description": "Alias for 'patch'. Key-value pairs of fields to update.",
-                "optional": true,
                 "additionalProperties": true
               }
             },
@@ -1264,28 +1155,25 @@
               },
               "parentId": {
                 "type": "string",
-                "description": "Optional parent ID (e.g., folder ID for Message, calendar ID for Event, message ID for Attachment). Required for Attachment.",
-                "optional": true
+                "description": "Optional parent ID (e.g., folder ID for Message, calendar ID for Event, message ID for Attachment). Required for Attachment."
               },
               "filters": {
                 "type": "object",
                 "description": "Optional ODATA filters for querying multiple entities.",
-                "optional": true,
                 "properties": {
-                  "from": { "type": "string", "optional": true, "description": "Filter by sender (for Message)." },
-                  "subject": { "type": "string", "optional": true, "description": "Filter by subject text (startswith)." },
-                  "isRead": { "type": "boolean", "optional": true, "description": "Filter by read status (Message)." },
-                  "hasAttachments": { "type": "boolean", "optional": true, "description": "Filter by attachment presence (Message)." },
-                  "displayName": { "type": "string", "optional": true, "description": "Filter by name (for Contact, MailFolder)." },
-                  "limit": { "type": "integer", "optional": true, "description": "Maximum records to return (max 1000)." },
-                  "offset": { "type": "integer", "optional": true, "description": "Number of records to skip (pagination)." }
+                  "from": { "type": "string", "description": "Filter by sender (for Message)." },
+                  "subject": { "type": "string", "description": "Filter by subject text (startswith)." },
+                  "isRead": { "type": "boolean", "description": "Filter by read status (Message)." },
+                  "hasAttachments": { "type": "boolean", "description": "Filter by attachment presence (Message)." },
+                  "displayName": { "type": "string", "description": "Filter by name (for Contact, MailFolder)." },
+                  "limit": { "type": "integer", "description": "Maximum records to return (max 1000)." },
+                  "offset": { "type": "integer", "description": "Number of records to skip (pagination)." }
                 }
               },
               "format": {
                 "type": "string",
                 "enum": ["detailed", "simple", "raw"],
                 "description": "Response format: 'detailed' (normalized), 'simple' (minimal), or 'raw' (API response). Defaults to 'detailed'.",
-                "optional": true,
                 "default": "detailed"
               }
             },
@@ -1318,8 +1206,7 @@
               },
               "calendarId": {
                 "type": "string",
-                "description": "Optional calendar ID. If omitted, uses default calendar.",
-                "optional": true
+                "description": "Optional calendar ID. If omitted, uses default calendar."
               }
             },
             "required": ["operation", "eventId"]
