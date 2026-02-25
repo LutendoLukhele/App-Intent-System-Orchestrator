@@ -707,47 +707,57 @@ Review the tool results in the previous messages and provide a comprehensive sum
 
             // If tool calls failed or no tool calls were made, attempt to generate a plan with placeholders
             // This allows vague requests to proceed with a plan that the UI can fill in missing params for
+            // BUT: Only do this in non-summary mode - in summary mode, we should just respond based on tool results
             if (!accumulatedToolCalls || accumulatedToolCalls.length === 0) {
-                logger.info('🔥 No valid tool calls from conversational stream, attempting plan generation with placeholders', {
-                    sessionId,
-                    streamId,
-                    userMessage: currentUserMessage?.substring(0, 100),
-                    hasConversationalText: !!accumulatedText
-                });
-                
-                try {
-                    // Attempt to generate a plan from the user message
-                    // The planner will create a plan with placeholders for missing parameters
-                    const generatedPlan = await this.generatePlanWithPlaceholders(
-                        currentUserMessage || '',
+                // Skip plan generation in summary mode - just respond based on tool results
+                if (isSummaryMode) {
+                    logger.info('🔥 Summary mode: No tool calls, not generating new plan (responding based on tool results)', {
                         sessionId,
-                        currentMessageId,
-                        _userId
-                    );
-
-                    if (generatedPlan && generatedPlan.length > 0) {
-                        logger.info('🔥 Successfully generated plan with placeholders', {
-                            sessionId,
-                            stepCount: generatedPlan.length,
-                            toolNames: generatedPlan.map((s: any) => s.tool)
-                        });
-                        // Convert plan steps to aggregated tool calls format
-                        for (const step of generatedPlan) {
-                            aggregatedToolCallsOutput.push({
-                                name: step.tool,
-                                arguments: step.arguments,
-                                id: step.id,
-                                function: step.function,
-                                streamType: 'planner'
-                            });
-                        }
-                    }
-                } catch (planError: any) {
-                    logger.warn('🔥 Plan generation with placeholders failed', {
-                        sessionId,
-                        error: planError.message
+                        streamId,
+                        hasConversationalText: !!accumulatedText
                     });
-                    // Continue without plan - conversational response is still valid
+                } else {
+                    logger.info('🔥 No valid tool calls from conversational stream, attempting plan generation with placeholders', {
+                        sessionId,
+                        streamId,
+                        userMessage: currentUserMessage?.substring(0, 100),
+                        hasConversationalText: !!accumulatedText
+                    });
+                
+                    try {
+                        // Attempt to generate a plan from the user message
+                        // The planner will create a plan with placeholders for missing parameters
+                        const generatedPlan = await this.generatePlanWithPlaceholders(
+                            currentUserMessage || '',
+                            sessionId,
+                            currentMessageId,
+                            _userId
+                        );
+
+                        if (generatedPlan && generatedPlan.length > 0) {
+                            logger.info('🔥 Successfully generated plan with placeholders', {
+                                sessionId,
+                                stepCount: generatedPlan.length,
+                                toolNames: generatedPlan.map((s: any) => s.tool)
+                            });
+                            // Convert plan steps to aggregated tool calls format
+                            for (const step of generatedPlan) {
+                                aggregatedToolCallsOutput.push({
+                                    name: step.tool,
+                                    arguments: step.arguments,
+                                    id: step.id,
+                                    function: step.function,
+                                    streamType: 'planner'
+                                });
+                            }
+                        }
+                    } catch (planError: any) {
+                        logger.warn('🔥 Plan generation with placeholders failed', {
+                            sessionId,
+                            error: planError.message
+                        });
+                        // Continue without plan - conversational response is still valid
+                    }
                 }
             }
 
