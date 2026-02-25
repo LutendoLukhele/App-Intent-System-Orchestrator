@@ -65,11 +65,11 @@ services:
     deploy:
       resources:
         limits:
-          cpus: '3'
-          memory: 4G
-        reservations:
-          cpus: '1.5'
+          cpus: '2'
           memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 1G
 
   # PostgreSQL Database (Optional - using Neon for bootstrap)
   # Comment out if using Neon cloud DB (recommended for bootstrap)
