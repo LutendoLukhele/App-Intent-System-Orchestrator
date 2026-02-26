@@ -499,7 +499,11 @@ export class ToolOrchestrator extends BaseService {
         // For SalesforceEntity model, fetch larger batch since all entity types are mixed
         // User's limit will be applied after entityType filtering
         const isMultiEntityModel = model === 'SalesforceEntity';
-        const fetchLimit = isMultiEntityModel ? 500 : (args.filters?.limit || args.limit || 100);
+        // Limit records to 15 by default for performance, unless user specifies otherwise
+        const userLimit = args.filters?.limit || args.limit;
+        const fetchLimit = isMultiEntityModel 
+            ? (userLimit ? Math.min(userLimit, 50) : 50)  // Multi-entity: max 50 for filtering
+            : (userLimit || 15);  // Single entity: default 15
         
         const cacheOptions: any = {
             limit: fetchLimit,
@@ -1115,7 +1119,7 @@ export class ToolOrchestrator extends BaseService {
         };
         
         const offset = extractValue(filters.offset) ?? extractValue(args.offset) ?? 0;
-        const limit = extractValue(filters.limit) ?? extractValue(args.limit) ?? 100;
+        const limit = extractValue(filters.limit) ?? extractValue(args.limit) ?? 15;
         
         this.logger.info('🔍 [applyFilters] Pagination', {
             rawFiltersLimit: filters.limit,
